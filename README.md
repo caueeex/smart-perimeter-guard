@@ -1,4 +1,10 @@
-# Welcome to your Lovable project
+# SecureVision - Sistema de Monitoramento Inteligente
+
+Sistema de vigilância com IA para detecção automática de invasões através de câmeras IP.
+
+## 🎯 Sobre o Projeto
+
+Projeto integrador acadêmico que integra **Front-end**, **Back-end Python**, **Inteligência Artificial** e **Engenharia de Software**.
 
 ## Project info
 
