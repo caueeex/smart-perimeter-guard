@@ -3,24 +3,47 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Shield, Eye, EyeOff } from "lucide-react";
+import { Shield, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { authService, apiUtils } from "@/services/api";
 
 const Login = () => {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock login - integração futura com Lovable Cloud
-    if (email && password) {
+    
+    if (!email || !password) {
+      toast.error("Preencha todos os campos");
+      return;
+    }
+
+    setIsLoading(true);
+    
+    try {
+      // Fazer login via API
+      const response = await authService.login(email, password);
+      
+      // Salvar token e dados do usuário
+      apiUtils.setToken(response.access_token);
+      
+      // Obter dados do usuário
+      const user = await authService.getCurrentUser();
+      apiUtils.setUser(user);
+      
       toast.success("Login realizado com sucesso!");
       navigate("/dashboard");
-    } else {
-      toast.error("Preencha todos os campos");
+      
+    } catch (error: any) {
+      console.error("Erro no login:", error);
+      toast.error(error.response?.data?.detail || "Erro ao fazer login");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -71,8 +94,19 @@ const Login = () => {
             </div>
           </div>
 
-          <Button type="submit" className="w-full bg-gradient-primary hover:opacity-90 shadow-glow">
-            Entrar
+          <Button 
+            type="submit" 
+            className="w-full bg-gradient-primary hover:opacity-90 shadow-glow"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Entrando...
+              </>
+            ) : (
+              "Entrar"
+            )}
           </Button>
 
           <div className="text-center">
