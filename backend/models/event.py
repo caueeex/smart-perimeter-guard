@@ -42,7 +42,7 @@ class Event(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relacionamentos
-    camera = relationship("Camera", back_populates="events")
+    # camera = relationship("Camera", back_populates="events")  # Comentado para evitar erro de importação circular
 
     def __repr__(self):
         return f"<Event(id={self.id}, type='{self.event_type}', camera_id={self.camera_id})>"

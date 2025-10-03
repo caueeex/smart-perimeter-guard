@@ -9,7 +9,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/
 // Instância do axios
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000, // Aumentado para 30 segundos
   headers: {
     'Content-Type': 'application/json',
   },
@@ -29,18 +29,23 @@ api.interceptors.request.use(
   }
 );
 
-// Interceptor para tratar respostas
+// Interceptor para tratamento de erros
 api.interceptors.response.use(
   (response: AxiosResponse) => {
     return response;
   },
   (error) => {
-    if (error.response?.status === 401) {
+    console.error('API Error:', error);
+    
+    if (error.code === 'ECONNABORTED') {
+      console.error('Request timeout - Backend pode estar offline');
+    } else if (error.response?.status === 401) {
       // Token expirado ou inválido
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
       window.location.href = '/';
     }
+    
     return Promise.reject(error);
   }
 );
@@ -145,6 +150,74 @@ export const authService = {
   // Obter dados do usuário atual
   getCurrentUser: async (): Promise<User> => {
     const response = await api.get('/auth/me');
+    return response.data;
+  },
+};
+
+export const webcamService = {
+  // Listar câmeras disponíveis
+  getAvailableCameras: async (): Promise<any[]> => {
+    const response = await api.get('/webcam/devices');
+    return response.data.cameras;
+  },
+
+  // Testar câmera
+  testCamera: async (cameraIndex: number): Promise<any> => {
+    const response = await api.get(`/webcam/test/${cameraIndex}`);
+    return response.data;
+  },
+};
+
+export const streamService = {
+  // Iniciar stream
+  startStream: async (cameraId: number, streamUrl: string): Promise<any> => {
+    const response = await api.get(`/stream/start/${cameraId}`, {
+      params: { stream_url: streamUrl }
+    });
+    return response.data;
+  },
+
+  // Parar stream
+  stopStream: async (cameraId: number): Promise<any> => {
+    const response = await api.get(`/stream/stop/${cameraId}`);
+    return response.data;
+  },
+
+  // Obter informações do stream
+  getStreamInfo: async (cameraId: number): Promise<any> => {
+    const response = await api.get(`/stream/info/${cameraId}`);
+    return response.data;
+  },
+
+  // Obter frame atual
+  getFrame: async (cameraId: number): Promise<any> => {
+    const response = await api.get(`/stream/frame/${cameraId}`);
+    return response.data;
+  },
+};
+
+export const detectionService = {
+  // Configurar linha de detecção
+  configureDetectionLine: async (cameraId: number, lineConfig: any): Promise<any> => {
+    const response = await api.post(`/detection/line/${cameraId}`, lineConfig);
+    return response.data;
+  },
+
+  // Configurar zona de detecção
+  configureDetectionZone: async (cameraId: number, zoneConfig: any): Promise<any> => {
+    const response = await api.post(`/detection/zone/${cameraId}`, zoneConfig);
+    return response.data;
+  },
+
+  // Obter configuração de detecção
+  getDetectionConfig: async (cameraId: number): Promise<any> => {
+    const response = await api.get(`/detection/config/${cameraId}`);
+    return response.data;
+  },
+
+  // Ativar/desativar detecção
+  toggleDetection: async (cameraId: number, enabled: boolean): Promise<any> => {
+    const response = await api.post(`/detection/toggle/${cameraId}`, { enabled });
     return response.data;
   },
 };

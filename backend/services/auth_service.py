@@ -68,9 +68,15 @@ class AuthService:
         return token_data
 
     @staticmethod
-    def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
+    def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
         """Autenticar usuário"""
-        user = db.query(User).filter(User.email == email).first()
+        # Tentar buscar por username primeiro
+        user = db.query(User).filter(User.username == username).first()
+        
+        # Se não encontrar por username, tentar por email
+        if not user:
+            user = db.query(User).filter(User.email == username).first()
+        
         if not user:
             return None
         if not AuthService.verify_password(password, user.hashed_password):

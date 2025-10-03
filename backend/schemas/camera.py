@@ -43,13 +43,35 @@ class CameraInDB(CameraBase):
     """Schema de câmera no banco"""
     id: int
     status: CameraStatus
-    detection_line: Optional[Dict[str, Any]] = None
-    detection_zone: Optional[Dict[str, Any]] = None
+    detection_line: Optional[str] = None  # JSON string
+    detection_zone: Optional[str] = None  # JSON string
     created_at: datetime
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+    @property
+    def detection_line_dict(self) -> Optional[Dict[str, Any]]:
+        """Converter detection_line para dict"""
+        if self.detection_line:
+            import json
+            try:
+                return json.loads(self.detection_line)
+            except:
+                return None
+        return None
+
+    @property
+    def detection_zone_dict(self) -> Optional[Dict[str, Any]]:
+        """Converter detection_zone para dict"""
+        if self.detection_zone:
+            import json
+            try:
+                return json.loads(self.detection_zone)
+            except:
+                return None
+        return None
 
 
 class Camera(CameraInDB):
@@ -59,7 +81,7 @@ class Camera(CameraInDB):
 
 class CameraWithEvents(Camera):
     """Schema de câmera com eventos"""
-    events: List["Event"] = []
+    # events: List["Event"] = []  # Comentado para evitar erro de importação circular
 
 
 class DetectionLineConfig(BaseModel):

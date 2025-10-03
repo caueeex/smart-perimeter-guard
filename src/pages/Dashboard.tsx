@@ -1,10 +1,20 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Camera, AlertTriangle, Activity, TrendingUp, Eye, Users, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Camera, AlertTriangle, Activity, TrendingUp, Eye, Users, Loader2, Plus } from "lucide-react";
 import Layout from "@/components/Layout";
 import { cameraService, eventService, apiUtils } from "@/services/api";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import LiveStream from "@/components/LiveStream";
+import WebcamSelector from "@/components/WebcamSelector";
+import StreamTest from "@/components/StreamTest";
+import DetectionMonitor from "@/components/DetectionMonitor";
 
 interface DashboardStats {
   totalCameras: number;
@@ -31,6 +41,18 @@ const Dashboard = () => {
   const [cameras, setCameras] = useState<any[]>([]);
   const [recentEvents, setRecentEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isAddingCamera, setIsAddingCamera] = useState(false);
+  const [newCamera, setNewCamera] = useState({
+    name: '',
+    location: '',
+    stream_url: '',
+    zone: '',
+    detection_enabled: true,
+    sensitivity: 50,
+    fps: 15,
+    resolution: '640x480'
+  });
 
   useEffect(() => {
     loadDashboardData();
@@ -69,10 +91,49 @@ const Dashboard = () => {
       
     } catch (error) {
       console.error("Erro ao carregar dados do dashboard:", error);
-      toast.error("Erro ao carregar dados do dashboard");
+      toast.error("Erro ao carregar dados do dashboard. Verifique se o backend está rodando.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleAddCamera = async () => {
+    if (!newCamera.name || !newCamera.stream_url) {
+      toast.error("Nome e URL do stream são obrigatórios");
+      return;
+    }
+
+    try {
+      setIsAddingCamera(true);
+      const createdCamera = await cameraService.createCamera(newCamera);
+      toast.success("Câmera adicionada com sucesso!");
+      setIsAddDialogOpen(false);
+      setNewCamera({
+        name: '',
+        location: '',
+        stream_url: '',
+        zone: '',
+        detection_enabled: true,
+        sensitivity: 50,
+        fps: 15,
+        resolution: '640x480'
+      });
+      loadDashboardData(); // Recarregar dados
+    } catch (error) {
+      console.error("Erro ao adicionar câmera:", error);
+      toast.error("Erro ao adicionar câmera");
+    } finally {
+      setIsAddingCamera(false);
+    }
+  };
+
+  const handleWebcamSelect = (webcam: any) => {
+    setNewCamera({
+      ...newCamera,
+      name: webcam.name,
+      stream_url: webcam.stream_url,
+      resolution: webcam.resolution
+    });
   };
 
   return (
@@ -84,10 +145,174 @@ const Dashboard = () => {
           <h1 className="text-3xl font-bold text-foreground">Central de Monitoramento</h1>
           <p className="text-muted-foreground mt-1">Sistema Inteligente de Vigilância</p>
         </div>
-        <Button className="bg-gradient-primary hover:opacity-90 shadow-glow">
-          <Camera className="w-4 h-4 mr-2" />
-          Nova Câmera
-        </Button>
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-gradient-primary hover:opacity-90 shadow-glow">
+              <Plus className="w-4 h-4 mr-2" />
+              Nova Câmera
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="bg-card border-border max-w-md">
+            <DialogHeader>
+              <DialogTitle>Adicionar Nova Câmera</DialogTitle>
+              <DialogDescription>Configure os parâmetros da nova câmera</DialogDescription>
+            </DialogHeader>
+            <Tabs defaultValue="webcam" className="pt-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="webcam">Câmera do PC</TabsTrigger>
+                <TabsTrigger value="ip">Câmera IP</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="webcam" className="space-y-4 mt-4">
+                <WebcamSelector onSelect={handleWebcamSelect} />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Nome da Câmera</Label>
+                    <Input 
+                      placeholder="Ex: Câmera do PC" 
+                      className="bg-background border-border"
+                      value={newCamera.name}
+                      onChange={(e) => setNewCamera({...newCamera, name: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Localização</Label>
+                    <Input 
+                      placeholder="Ex: Escritório" 
+                      className="bg-background border-border"
+                      value={newCamera.location}
+                      onChange={(e) => setNewCamera({...newCamera, location: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Zona</Label>
+                    <Select value={newCamera.zone} onValueChange={(value) => setNewCamera({...newCamera, zone: value})}>
+                      <SelectTrigger className="bg-background border-border">
+                        <SelectValue placeholder="Selecione a zona" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="A1">Zona A1</SelectItem>
+                        <SelectItem value="A2">Zona A2</SelectItem>
+                        <SelectItem value="B1">Zona B1</SelectItem>
+                        <SelectItem value="B2">Zona B2</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between pt-2">
+                    <Label>Detecção Automática</Label>
+                    <Switch 
+                      checked={newCamera.detection_enabled}
+                      onCheckedChange={(checked) => setNewCamera({...newCamera, detection_enabled: checked})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Sensibilidade</Label>
+                    <Input 
+                      type="number" 
+                      min="1" 
+                      max="100" 
+                      value={newCamera.sensitivity}
+                      onChange={(e) => setNewCamera({...newCamera, sensitivity: parseInt(e.target.value)})}
+                      className="bg-background border-border"
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleAddCamera} 
+                    disabled={isAddingCamera || !newCamera.stream_url}
+                    className="w-full bg-gradient-primary hover:opacity-90"
+                  >
+                    {isAddingCamera ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Adicionando...
+                      </>
+                    ) : (
+                      'Adicionar Câmera'
+                    )}
+                  </Button>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="ip" className="space-y-4 mt-4">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Nome da Câmera</Label>
+                    <Input 
+                      placeholder="Ex: Câmera Entrada" 
+                      className="bg-background border-border"
+                      value={newCamera.name}
+                      onChange={(e) => setNewCamera({...newCamera, name: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Localização</Label>
+                    <Input 
+                      placeholder="Ex: Setor A - Corredor 1" 
+                      className="bg-background border-border"
+                      value={newCamera.location}
+                      onChange={(e) => setNewCamera({...newCamera, location: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>URL do Stream</Label>
+                    <Input 
+                      placeholder="rtsp://..." 
+                      className="bg-background border-border"
+                      value={newCamera.stream_url}
+                      onChange={(e) => setNewCamera({...newCamera, stream_url: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Zona</Label>
+                    <Select value={newCamera.zone} onValueChange={(value) => setNewCamera({...newCamera, zone: value})}>
+                      <SelectTrigger className="bg-background border-border">
+                        <SelectValue placeholder="Selecione a zona" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="A1">Zona A1</SelectItem>
+                        <SelectItem value="A2">Zona A2</SelectItem>
+                        <SelectItem value="B1">Zona B1</SelectItem>
+                        <SelectItem value="B2">Zona B2</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between pt-2">
+                    <Label>Detecção Automática</Label>
+                    <Switch 
+                      checked={newCamera.detection_enabled}
+                      onCheckedChange={(checked) => setNewCamera({...newCamera, detection_enabled: checked})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Sensibilidade</Label>
+                    <Input 
+                      type="number" 
+                      min="1" 
+                      max="100" 
+                      value={newCamera.sensitivity}
+                      onChange={(e) => setNewCamera({...newCamera, sensitivity: parseInt(e.target.value)})}
+                      className="bg-background border-border"
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleAddCamera} 
+                    disabled={isAddingCamera}
+                    className="w-full bg-gradient-primary hover:opacity-90"
+                  >
+                    {isAddingCamera ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Adicionando...
+                      </>
+                    ) : (
+                      'Adicionar Câmera'
+                    )}
+                  </Button>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Stats Grid */}
@@ -177,31 +402,14 @@ const Dashboard = () => {
           ))
         ) : cameras.length > 0 ? (
           cameras.map((camera) => (
-            <Card key={camera.id} className="overflow-hidden bg-card border-border shadow-card hover:shadow-glow transition-all duration-300">
-              <div className="aspect-video bg-muted relative group cursor-pointer">
-                <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <div className="absolute top-4 right-4 flex gap-2">
-                  <span className={`px-3 py-1 text-xs font-semibold rounded-full flex items-center gap-1 ${
-                    camera.status === 'online' 
-                      ? 'bg-success text-success-foreground' 
-                      : camera.status === 'offline'
-                      ? 'bg-destructive text-destructive-foreground'
-                      : 'bg-warning text-warning-foreground'
-                  }`}>
-                    <div className={`w-2 h-2 rounded-full ${
-                      camera.status === 'online' ? 'bg-success-foreground animate-pulse' : 'bg-current'
-                    }`} />
-                    {camera.status.toUpperCase()}
-                  </span>
-                </div>
-                <div className="absolute bottom-4 left-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <Button variant="secondary" size="sm" className="w-full">
-                    <Eye className="w-4 h-4 mr-2" />
-                    Visualizar ao Vivo
-                  </Button>
-                </div>
-              </div>
-              <div className="p-4">
+            <div key={camera.id} className="space-y-4">
+              <LiveStream 
+                streamUrl={camera.stream_url} 
+                cameraName={camera.name}
+                cameraId={camera.id}
+                className="w-full"
+              />
+              <div className="p-4 bg-card border border-border rounded-lg shadow-card">
                 <h3 className="font-semibold text-foreground">{camera.name}</h3>
                 <p className="text-sm text-muted-foreground mt-1">{camera.location}</p>
                 <div className="mt-3 flex items-center justify-between text-xs">
@@ -211,19 +419,34 @@ const Dashboard = () => {
                   <Button variant="ghost" size="sm">Configurar</Button>
                 </div>
               </div>
-            </Card>
+            </div>
           ))
         ) : (
           <div className="col-span-full text-center py-12">
             <Camera className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-foreground mb-2">Nenhuma câmera encontrada</h3>
             <p className="text-muted-foreground mb-4">Adicione uma câmera para começar o monitoramento</p>
-            <Button className="bg-gradient-primary hover:opacity-90 shadow-glow">
-              <Camera className="w-4 h-4 mr-2" />
-              Adicionar Primeira Câmera
-            </Button>
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-gradient-primary hover:opacity-90 shadow-glow">
+                  <Camera className="w-4 h-4 mr-2" />
+                  Adicionar Primeira Câmera
+                </Button>
+              </DialogTrigger>
+            </Dialog>
           </div>
         )}
+      </div>
+
+      {/* Stream Test */}
+      {/* Detection Monitor */}
+      <div className="mt-8">
+        <DetectionMonitor />
+      </div>
+
+      {/* Stream Test Component */}
+      <div className="mt-8">
+        <StreamTest />
       </div>
       </div>
     </Layout>

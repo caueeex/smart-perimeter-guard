@@ -1,38 +1,17 @@
-# FastAPI e dependências principais
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
+sqlalchemy==2.0.23
+alembic==1.12.1
 python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
-python-decouple==3.8
-email-validator==2.1.0
-
-# Banco de dados
-sqlalchemy==2.0.23
-pymysql==1.1.0
-cryptography==41.0.7
-
-# IA e Visão Computacional
+python-dotenv==1.0.0
+psycopg2-binary==2.9.9
 opencv-python==4.8.1.78
-tensorflow==2.15.0
-numpy==1.24.3
-pillow==10.1.0
 ultralytics==8.0.196
-
-# WebSocket e notificações
+pillow==10.1.0
+numpy==1.24.3
+requests==2.31.0
 websockets==12.0
-aiofiles==23.2.1
-
-# Utilitários
 pydantic==2.5.0
-pydantic-settings==2.1.0
-httpx==0.25.2
-python-dateutil==2.8.2
-
-# Desenvolvimento
-pytest==7.4.3
-pytest-asyncio==0.21.1
-black==23.11.0
-flake8==6.1.0
-
+pydantic-settings==2.0.3

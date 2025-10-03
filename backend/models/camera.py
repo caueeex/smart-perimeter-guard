@@ -34,8 +34,8 @@ class Camera(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relacionamentos
-    events = relationship("Event", back_populates="camera")
+    # Relacionamentos (comentado para evitar erro de importação circular)
+    # events = relationship("Event", back_populates="camera")
 
     def __repr__(self):
         return f"<Camera(id={self.id}, name='{self.name}', status='{self.status}')>"

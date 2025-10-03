@@ -1,8 +1,9 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Check, Trash2, AlertTriangle, Info, CheckCircle } from "lucide-react";
+import { Bell, Check, Trash2, AlertTriangle, Info, CheckCircle, Eye } from "lucide-react";
 import Layout from "@/components/Layout";
+import NotificationDetails from "@/components/NotificationDetails";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -22,7 +23,7 @@ const Notifications = () => {
       id: 1,
       type: "alert",
       title: "Invasão Detectada",
-      message: "Movimento suspeito detectado na linha de segurança",
+      message: "Movimento suspeito detectado na linha de segurança. O sistema identificou uma pessoa não autorizada cruzando a área restrita. A detecção ocorreu com 95% de confiança. Recomenda-se verificação imediata da área e contato com a equipe de segurança.",
       timestamp: "Há 5 minutos",
       read: false,
       cameraName: "Câmera 1 - Entrada Principal",
@@ -31,7 +32,7 @@ const Notifications = () => {
       id: 2,
       type: "alert",
       title: "Zona Violada",
-      message: "Objeto não autorizado cruzou a linha de detecção",
+      message: "Objeto não autorizado cruzou a linha de detecção no estacionamento. O sistema detectou movimento em área restrita durante horário não permitido. Verifique as imagens capturadas para identificar o objeto detectado.",
       timestamp: "Há 12 minutos",
       read: false,
       cameraName: "Câmera 3 - Estacionamento",
@@ -40,7 +41,7 @@ const Notifications = () => {
       id: 3,
       type: "info",
       title: "Câmera Offline",
-      message: "Câmera 4 perdeu conexão com o servidor",
+      message: "Câmera 4 perdeu conexão com o servidor principal. Tentativas de reconexão automática estão sendo realizadas. Verifique a conexão de rede e o status do equipamento.",
       timestamp: "Há 1 hora",
       read: true,
       cameraName: "Câmera 4 - Corredor A",
@@ -49,11 +50,14 @@ const Notifications = () => {
       id: 4,
       type: "success",
       title: "Sistema Atualizado",
-      message: "Módulo de IA atualizado para versão 2.1",
+      message: "Módulo de IA atualizado para versão 2.1 com melhorias na detecção de objetos e redução de falsos positivos. O sistema agora possui maior precisão na identificação de intrusões.",
       timestamp: "Há 3 horas",
       read: true,
     },
   ]);
+
+  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -94,6 +98,11 @@ const Notifications = () => {
   const markAllAsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     toast.success("Todas notificações marcadas como lidas");
+  };
+
+  const handleViewDetails = (notification: Notification) => {
+    setSelectedNotification(notification);
+    setIsDetailsDialogOpen(true);
   };
 
   return (
@@ -201,11 +210,15 @@ const Notifications = () => {
                         Marcar como lida
                       </Button>
                     )}
-                    {notification.type === "alert" && (
-                      <Button variant="outline" size="sm" className="border-border">
-                        Ver Detalhes
-                      </Button>
-                    )}
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="border-border"
+                      onClick={() => handleViewDetails(notification)}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      Ver Detalhes
+                    </Button>
                     <Button
                       onClick={() => deleteNotification(notification.id)}
                       variant="ghost"
@@ -229,6 +242,19 @@ const Notifications = () => {
               Você está em dia! Não há notificações no momento.
             </p>
           </Card>
+        )}
+
+        {/* Notification Details Dialog */}
+        {selectedNotification && (
+          <NotificationDetails
+            notification={selectedNotification}
+            isOpen={isDetailsDialogOpen}
+            onClose={() => {
+              setIsDetailsDialogOpen(false);
+              setSelectedNotification(null);
+            }}
+            onMarkAsRead={markAsRead}
+          />
         )}
       </div>
     </Layout>
