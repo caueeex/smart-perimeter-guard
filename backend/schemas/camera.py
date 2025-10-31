@@ -43,35 +43,16 @@ class CameraInDB(CameraBase):
     """Schema de câmera no banco"""
     id: int
     status: CameraStatus
-    detection_line: Optional[str] = None  # JSON string
-    detection_zone: Optional[str] = None  # JSON string
+    # No banco é JSON, expor como dict no schema para evitar 500 de validação
+    detection_line: Optional[Dict[str, Any]] = None
+    detection_zone: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
-    @property
-    def detection_line_dict(self) -> Optional[Dict[str, Any]]:
-        """Converter detection_line para dict"""
-        if self.detection_line:
-            import json
-            try:
-                return json.loads(self.detection_line)
-            except:
-                return None
-        return None
-
-    @property
-    def detection_zone_dict(self) -> Optional[Dict[str, Any]]:
-        """Converter detection_zone para dict"""
-        if self.detection_zone:
-            import json
-            try:
-                return json.loads(self.detection_zone)
-            except:
-                return None
-        return None
+    # Conversores não são mais necessários pois o tipo já é dict
 
 
 class Camera(CameraInDB):
@@ -97,6 +78,8 @@ class DetectionLineConfig(BaseModel):
 class DetectionZoneConfig(BaseModel):
     """Schema para configuração de zona de detecção"""
     points: List[Dict[str, float]]  # Lista de pontos {x, y}
+    ref_w: Optional[int] = None
+    ref_h: Optional[int] = None
     color: str = "#ff0000"
     fill_color: str = "#ff000020"
 

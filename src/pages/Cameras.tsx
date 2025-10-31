@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,10 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import Layout from "@/components/Layout";
 import LiveStream from "@/components/LiveStream";
-import CameraConfig from "@/components/CameraConfig";
+import CameraConfigSimple from "@/components/CameraConfigSimple";
 import WebcamSelector from "@/components/WebcamSelector";
-import CameraTest from "@/components/CameraTest";
-import CameraDebug from "@/components/CameraDebug";
+import StreamTest from "@/components/StreamTest";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cameraService, Camera as CameraType } from "@/services/api";
 
@@ -23,6 +22,10 @@ const Cameras = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState<CameraType | null>(null);
+  // Desenho de área
+  const [areaPoints, setAreaPoints] = useState<{x:number;y:number}[]>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddingCamera, setIsAddingCamera] = useState(false);
   const [newCamera, setNewCamera] = useState({
@@ -109,9 +112,24 @@ const Cameras = () => {
     }
   };
 
-  const handleConfigureCamera = (camera: CameraType) => {
+  const handleConfigureCamera = async (camera: CameraType) => {
+    console.log('🔧 handleConfigureCamera chamado com câmera:', camera);
     setSelectedCamera(camera);
     setIsConfigDialogOpen(true);
+    console.log('🔧 Estados atualizados - selectedCamera:', camera.id, 'isConfigDialogOpen: true');
+    setAreaPoints([]);
+    setIsDrawing(false);
+    try {
+      // Buscar configuração atual para pré-preencher a área
+      const fresh = await cameraService.getCamera(camera.id);
+      if (fresh && (fresh as any).detection_zone && (fresh as any).detection_zone.points) {
+        const pts = (fresh as any).detection_zone.points as Array<{x:number;y:number}>;
+        setAreaPoints(pts);
+        setIsDrawing(true);
+      }
+    } catch (e) {
+      console.warn('Não foi possível carregar zona existente da câmera');
+    }
   };
 
   const handleConfigSave = (updatedCamera: CameraType) => {
@@ -330,6 +348,7 @@ const Cameras = () => {
                 cameraName={camera.name}
                 cameraId={camera.id}
                 className="w-full"
+                onConfigure={() => handleConfigureCamera(camera)}
               />
 
               {/* Camera Info */}
@@ -400,23 +419,119 @@ const Cameras = () => {
         </div>
       )}
 
-      {/* Camera Configuration Dialog */}
-      {selectedCamera && (
-        <CameraConfig
-          camera={selectedCamera}
-          isOpen={isConfigDialogOpen}
-          onClose={() => {
-            setIsConfigDialogOpen(false);
-            setSelectedCamera(null);
-          }}
-          onSave={handleConfigSave}
-        />
+      {/* Camera Configuration Dialog - Configurar Área */}
+      {isConfigDialogOpen && selectedCamera && (
+        <Dialog open={isConfigDialogOpen} onOpenChange={() => {
+          console.log('🔧 Dialog onOpenChange chamado');
+          setIsConfigDialogOpen(false);
+          setSelectedCamera(null);
+        }}>
+          <DialogContent className="bg-card border-border max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Configurar Área de Detecção</DialogTitle>
+              <DialogDescription>Clique no painel para marcar pontos do polígono. Clique em "Concluir" para fechar a área.</DialogDescription>
+            </DialogHeader>
+            
+            <div className="py-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
+                <div className="relative w-full select-none">
+                  {/* Preview da câmera */}
+                  <LiveStream 
+                    streamUrl={selectedCamera.stream_url}
+                    cameraName={selectedCamera.name}
+                    cameraId={selectedCamera.id}
+                    className="pointer-events-none"
+                  />
+                  {/* Overlay de desenho */}
+                  <div
+                    ref={overlayRef}
+                    className="absolute inset-0 rounded-md border border-transparent"
+                    onClick={(e) => {
+                      const target = e.currentTarget as HTMLDivElement;
+                      const rect = target.getBoundingClientRect();
+                      const x = e.clientX - rect.left;
+                      const y = e.clientY - rect.top;
+                      setAreaPoints(prev => [...prev, { x, y }]);
+                      setIsDrawing(true);
+                    }}
+                  >
+                    <svg className="absolute inset-0 w-full h-full">
+                      {areaPoints.length > 1 && (
+                        <polyline
+                          points={areaPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                          fill="rgba(239,68,68,0.15)"
+                          stroke="#ef4444"
+                          strokeWidth={2}
+                        />
+                      )}
+                      {areaPoints.map((p, idx) => (
+                        <circle key={idx} cx={p.x} cy={p.y} r={4} fill="#ef4444" />
+                      ))}
+                    </svg>
+                    {!isDrawing && (
+                      <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                        Clique para marcar os pontos da área
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm text-muted-foreground">
+                  Câmera: <span className="text-foreground font-medium">{selectedCamera.name}</span>
+                </div>
+                <div className="text-sm">Pontos: {areaPoints.length}</div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setAreaPoints([])}>Limpar</Button>
+                  <Button
+                    onClick={async () => {
+                      if (areaPoints.length < 3) {
+                        toast.error('Marque pelo menos 3 pontos.');
+                        return;
+                      }
+                      try {
+                        const ref_w = overlayRef.current?.clientWidth || 1280;
+                        const ref_h = overlayRef.current?.clientHeight || 720;
+                        const payload: any = { points: areaPoints, ref_w, ref_h };
+                        await cameraService.configureDetectionZone(selectedCamera.id, payload);
+                        // Atualizar câmera selecionada com zona salva
+                        const updated = await cameraService.getCamera(selectedCamera.id);
+                        setSelectedCamera(updated as any);
+                        toast.success('Área salva na câmera!');
+                        setIsConfigDialogOpen(false);
+                        setSelectedCamera(null);
+                      } catch (err) {
+                        console.error('Erro ao salvar área:', err);
+                        toast.error('Erro ao salvar área');
+                      }
+                    }}
+                  >
+                    Concluir
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">A área é salva normalizada ao tamanho do painel atual.</p>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setIsConfigDialogOpen(false);
+                setSelectedCamera(null);
+              }}>
+                Fechar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
 
-      {/* Camera Test Components */}
-      <div className="mt-8 space-y-6">
-        <CameraDebug />
-        <CameraTest />
+      {/* Teste de Stream */}
+      <div className="mt-8">
+        <h2 className="text-2xl font-bold text-foreground mb-4">🎥 Teste de Stream</h2>
+        <p className="text-muted-foreground mb-6">
+          Teste a conexão de câmeras web e RTSP antes de adicioná-las ao sistema
+        </p>
+        <StreamTest />
       </div>
       </div>
     </Layout>

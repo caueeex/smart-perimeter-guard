@@ -37,13 +37,16 @@ api.interceptors.response.use(
   (error) => {
     console.error('API Error:', error);
     
-    if (error.code === 'ECONNABORTED') {
-      console.error('Request timeout - Backend pode estar offline');
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      console.error('Request timeout - Backend pode estar offline ou muito lento');
+      // Não mostrar toast aqui, deixar o componente lidar com isso
     } else if (error.response?.status === 401) {
       // Token expirado ou inválido
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
       window.location.href = '/';
+    } else if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+      console.error('Erro de rede - Backend pode estar offline');
     }
     
     return Promise.reject(error);
@@ -252,8 +255,21 @@ export const cameraService = {
 
   // Atualizar câmera
   updateCamera: async (id: number, cameraData: Partial<Camera>): Promise<Camera> => {
-    const response = await api.put(`/cameras/${id}`, cameraData);
-    return response.data;
+    console.log('Atualizando câmera:', id, cameraData);
+    try {
+      const response = await api.patch(`/cameras/${id}`, cameraData);
+      return response.data;
+    } catch (error) {
+      console.error('Erro na API updateCamera:', error);
+      // Tentar com PUT se PATCH falhar
+      try {
+        const response = await api.put(`/cameras/${id}`, cameraData);
+        return response.data;
+      } catch (putError) {
+        console.error('Erro também com PUT:', putError);
+        throw putError;
+      }
+    }
   },
 
   // Deletar câmera
@@ -276,6 +292,8 @@ export const cameraService = {
   // Configurar zona de detecção
   configureDetectionZone: async (id: number, zoneConfig: {
     points: Array<{ x: number; y: number }>;
+    ref_w?: number;
+    ref_h?: number;
     color?: string;
     fill_color?: string;
   }): Promise<void> => {
@@ -290,6 +308,20 @@ export const cameraService = {
 };
 
 export const eventService = {
+  // Criar evento
+  createEvent: async (payload: {
+    camera_id?: number;
+    event_type: 'intrusion' | 'movement' | 'alert';
+    description?: string;
+    confidence?: number;
+    image_path?: string;
+    video_path?: string;
+    detected_objects?: any[];
+    bounding_boxes?: any[];
+  }): Promise<Event> => {
+    const response = await api.post('/events/', payload);
+    return response.data;
+  },
   // Listar eventos
   getEvents: async (params?: {
     skip?: number;
@@ -352,6 +384,49 @@ export const eventService = {
     const response = await api.get(`/events/heatmap/${cameraId}`, {
       params: { date_range: dateRange }
     });
+    return response.data;
+  },
+};
+
+// Serviço do YouTube
+export const youtubeService = {
+  // Processar URL do YouTube
+  processUrl: async (url: string): Promise<{
+    success: boolean;
+    video_info?: any;
+    stream_url?: string;
+    filename?: string;
+    error?: string;
+  }> => {
+    const response = await api.post('/youtube/process', { url });
+    return response.data;
+  },
+
+  // Obter informações do vídeo
+  getVideoInfo: async (videoId: string): Promise<any> => {
+    const response = await api.get(`/youtube/info/${videoId}`);
+    return response.data;
+  },
+
+  // Listar vídeos baixados
+  listVideos: async (): Promise<{
+    success: boolean;
+    videos?: Array<{
+      filename: string;
+      size: number;
+      size_mb: number;
+      created_at: string;
+      stream_url: string;
+    }>;
+    total?: number;
+  }> => {
+    const response = await api.get('/youtube/videos');
+    return response.data;
+  },
+
+  // Limpar vídeos antigos
+  cleanupVideos: async (): Promise<any> => {
+    const response = await api.delete('/youtube/cleanup');
     return response.data;
   },
 };

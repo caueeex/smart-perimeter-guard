@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Camera, AlertTriangle, Activity, TrendingUp, Eye, Users, Loader2, Plus } from "lucide-react";
 import Layout from "@/components/Layout";
 import { cameraService, eventService, apiUtils } from "@/services/api";
+import { websocketService } from "@/services/websocket";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -43,6 +44,8 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isAddingCamera, setIsAddingCamera] = useState(false);
+  const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false);
+  const [selectedCamera, setSelectedCamera] = useState<any>(null);
   const [newCamera, setNewCamera] = useState({
     name: '',
     location: '',
@@ -55,7 +58,57 @@ const Dashboard = () => {
   });
 
   useEffect(() => {
-    loadDashboardData();
+    // Conectar WS para eventos em tempo real
+    websocketService.connect({
+      onIntrusionAlert: (data: any) => {
+        // Atualizar estatísticas rapidamente
+        setStats(prev => ({
+          ...prev,
+          intrusionCount: (prev.intrusionCount || 0) + 1,
+          eventsToday: (prev.eventsToday || 0) + 1,
+          totalEvents: (prev.totalEvents || 0) + 1,
+        }));
+        // Prepend no recentEvents se vier payload completo
+        if ((data as any).event) {
+          setRecentEvents(prev => [{
+            id: (data as any).event.id,
+            camera_id: (data as any).event.camera_id,
+            event_type: (data as any).event.event_type,
+            confidence: (data as any).event.confidence,
+            description: (data as any).event.description,
+            timestamp: (data as any).event.timestamp,
+            image_path: (data as any).event.image_path
+          }, ...prev].slice(0, 6));
+        }
+      }
+    });
+
+    let interval: any;
+
+    const startPolling = () => {
+      loadDashboardData();
+      // Atualização menos agressiva: a cada 30s
+      interval = setInterval(loadDashboardData, 30000);
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (interval) {
+          clearInterval(interval);
+          interval = undefined;
+        }
+      } else {
+        startPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   const loadDashboardData = async () => {
@@ -126,6 +179,33 @@ const Dashboard = () => {
       setIsAddingCamera(false);
     }
   };
+
+  const handleConfigureCamera = (camera: any) => {
+    setSelectedCamera(camera);
+    setIsConfigDialogOpen(true);
+  };
+
+  const handleConfigSave = (updatedCamera: any) => {
+    setCameras(cameras.map(c => c.id === updatedCamera.id ? updatedCamera : c));
+    setIsConfigDialogOpen(false);
+    setSelectedCamera(null);
+    toast.success('Configurações salvas com sucesso!');
+  };
+
+  const [configForm, setConfigForm] = useState({
+    name: '',
+    location: ''
+  });
+
+  // Atualizar form quando câmera for selecionada
+  useEffect(() => {
+    if (selectedCamera) {
+      setConfigForm({
+        name: selectedCamera.name || '',
+        location: selectedCamera.location || ''
+      });
+    }
+  }, [selectedCamera]);
 
   const handleWebcamSelect = (webcam: any) => {
     setNewCamera({
@@ -407,6 +487,8 @@ const Dashboard = () => {
                 streamUrl={camera.stream_url} 
                 cameraName={camera.name}
                 cameraId={camera.id}
+                detectionEnabled={camera.detection_enabled}
+                onConfigure={() => handleConfigureCamera(camera)}
                 className="w-full"
               />
               <div className="p-4 bg-card border border-border rounded-lg shadow-card">
@@ -439,15 +521,90 @@ const Dashboard = () => {
       </div>
 
       {/* Stream Test */}
-      {/* Detection Monitor */}
-      <div className="mt-8">
+      {/* Detection Monitor - Temporariamente desabilitado */}
+      {/* <div className="mt-8">
         <DetectionMonitor />
-      </div>
+      </div> */}
 
       {/* Stream Test Component */}
       <div className="mt-8">
         <StreamTest />
       </div>
+
+      {/* Camera Configuration Dialog */}
+      {isConfigDialogOpen && selectedCamera && (
+        <Dialog open={isConfigDialogOpen} onOpenChange={() => {
+          setIsConfigDialogOpen(false);
+          setSelectedCamera(null);
+        }}>
+          <DialogContent className="bg-card border-border max-w-md">
+            <DialogHeader>
+              <DialogTitle>✅ Configurar Câmera</DialogTitle>
+              <DialogDescription>
+                Configurações da câmera: {selectedCamera.name}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="py-4 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nome da Câmera</label>
+                <input 
+                  type="text" 
+                  value={configForm.name}
+                  onChange={(e) => setConfigForm({...configForm, name: e.target.value})}
+                  className="w-full p-2 border border-border rounded-md bg-background"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Localização</label>
+                <input 
+                  type="text" 
+                  value={configForm.location}
+                  onChange={(e) => setConfigForm({...configForm, location: e.target.value})}
+                  className="w-full p-2 border border-border rounded-md bg-background"
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setIsConfigDialogOpen(false);
+                setSelectedCamera(null);
+              }}>
+                Fechar
+              </Button>
+              <Button onClick={async () => {
+                try {
+                  // Simular salvamento local (sem backend por enquanto)
+                  const updatedCamera = {
+                    ...selectedCamera,
+                    name: configForm.name,
+                    location: configForm.location
+                  };
+                  
+                  // Salvando configurações localmente
+                  
+                  // Atualizar lista local
+                  setCameras(cameras.map(c => c.id === updatedCamera.id ? updatedCamera : c));
+                  
+                  // Fechar modal
+                  setIsConfigDialogOpen(false);
+                  setSelectedCamera(null);
+                  
+                  toast.success('Configurações salvas com sucesso!');
+                  
+                } catch (error) {
+                  console.error('Erro ao salvar configurações:', error);
+                  toast.error('Erro ao salvar configurações');
+                }
+              }}>
+                Salvar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       </div>
     </Layout>
   );

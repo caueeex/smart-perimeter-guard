@@ -11,7 +11,7 @@ interface WebcamDevice {
   name: string;
   resolution: string;
   fps: number;
-  stream_url: string;
+  stream_url: string; // webcam://<deviceId or index>
 }
 
 interface WebcamSelectorProps {
@@ -32,7 +32,30 @@ const WebcamSelector = ({ onSelect, className = '' }: WebcamSelectorProps) => {
   const loadAvailableCameras = async () => {
     try {
       setIsLoading(true);
-      const cameras = await webcamService.getAvailableCameras();
+      // 1) Tentar via navegador (mais confiável em Windows)
+      let cameras: WebcamDevice[] = [];
+      try {
+        if (navigator.mediaDevices?.enumerateDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(d => d.kind === 'videoinput');
+          cameras = videoDevices.map((d, idx) => ({
+            index: idx,
+            name: d.label || `Câmera ${idx}`,
+            resolution: 'auto',
+            fps: 30,
+            stream_url: `webcam://${encodeURIComponent(d.deviceId)}`
+          }));
+        }
+      } catch (e) {
+        console.warn('enumerateDevices falhou, tentando backend...', e);
+      }
+
+      // 2) Se navegador não retornou nada, usar backend OpenCV
+      if (cameras.length === 0) {
+        const apiCameras = await webcamService.getAvailableCameras();
+        cameras = apiCameras;
+      }
+
       setAvailableCameras(cameras);
     } catch (error) {
       console.error('Erro ao carregar câmeras:', error);

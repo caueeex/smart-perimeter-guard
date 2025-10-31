@@ -1,7 +1,7 @@
 """
 Aplicação principal FastAPI
 """
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -11,6 +11,11 @@ import os
 from config import settings
 from database import create_tables
 from api.v1 import api_router
+from sqlalchemy.orm import Session
+from database import SessionLocal
+from models.camera import Camera
+from services.detection_service import detection_service
+from websocket_manager import manager
 
 # Criar aplicação FastAPI
 app = FastAPI(
@@ -21,10 +26,16 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configurar CORS
+# Configurar CORS (origens explícitas para evitar bloqueio com credenciais)
+allowed_origins = [
+    "http://localhost:8080",  # Vite/Dev
+    "http://127.0.0.1:8080",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, especificar domínios
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,6 +63,23 @@ async def startup_event():
     os.makedirs(os.path.join(settings.upload_dir, "videos"), exist_ok=True)
     print("✅ Diretórios criados")
     
+    # Iniciar monitoramento para todas as câmeras com detecção habilitada
+    try:
+        db: Session = SessionLocal()
+        cameras = db.query(Camera).all()
+        started = 0
+        for cam in cameras:
+            if cam.detection_enabled and cam.stream_url:
+                try:
+                    detection_service.start_monitoring(cam.id, cam.stream_url)
+                    started += 1
+                except Exception as e:
+                    print(f"Falha ao iniciar detecção para câmera {cam.id}: {e}")
+        db.close()
+        print(f"✅ Detecção iniciada para {started} câmera(s)")
+    except Exception as e:
+        print(f"⚠️ Não foi possível iniciar detecção automática: {e}")
+
     print("🎯 SecureVision iniciado com sucesso!")
 
 
@@ -95,14 +123,32 @@ async def health_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handler global de exceções"""
+    origin = request.headers.get("origin") or "*"
     return JSONResponse(
         status_code=500,
         content={
             "detail": "Erro interno do servidor",
             "error": str(exc)
+        },
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
         }
     )
 
+
+@app.websocket('/ws')
+async def ws_endpoint(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        # Mantém a conexão aberta; o cliente pode enviar pings opcionais
+        while True:
+            await ws.receive_text()
+    except Exception:
+        pass
+    finally:
+        manager.disconnect(ws)
 
 if __name__ == "__main__":
     uvicorn.run(

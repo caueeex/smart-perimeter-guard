@@ -12,6 +12,24 @@ from services.detection_service import detection_service
 from models.user import User
 
 router = APIRouter()
+@router.post("/restart-all")
+def restart_all_detections(
+    current_user: User = Depends(AuthService.get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Reiniciar detecção para todas as câmeras com detecção habilitada"""
+    try:
+        cameras = db.query(Camera).all()
+        restarted = 0
+        for cam in cameras:
+            if cam.detection_enabled and cam.stream_url:
+                detection_service.stop_monitoring(cam.id)
+                detection_service.start_monitoring(cam.id, cam.stream_url)
+                restarted += 1
+        return {"success": True, "restarted": restarted}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao reiniciar: {e}")
+
 
 @router.get("/status")
 def get_detection_status(

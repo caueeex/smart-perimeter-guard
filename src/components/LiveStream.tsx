@@ -10,9 +10,11 @@ interface LiveStreamProps {
   cameraName: string;
   cameraId?: number;
   className?: string;
+  onConfigure?: () => void;
+  detectionEnabled?: boolean;
 }
 
-const LiveStream = ({ streamUrl, cameraName, cameraId, className = '' }: LiveStreamProps) => {
+const LiveStream = ({ streamUrl, cameraName, cameraId, className = '', onConfigure, detectionEnabled = false }: LiveStreamProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -23,6 +25,8 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '' }: LiveStr
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [streamStarted, setStreamStarted] = useState(false);
   const [frameInterval, setFrameInterval] = useState<NodeJS.Timeout | null>(null);
+
+  const initGuardRef = useRef<string | null>(null);
 
   useEffect(() => {
     const initializeStream = async () => {
@@ -35,17 +39,25 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '' }: LiveStr
           const video = videoRef.current;
           if (!video) return;
 
-          const cameraIndex = parseInt(streamUrl.split('://')[1]);
+          // Evitar re-inicializações em loop com a mesma URL
+          if (initGuardRef.current === streamUrl) {
+            setIsLoading(false);
+            return;
+          }
+          initGuardRef.current = streamUrl;
+
+          const token = streamUrl.split('://')[1] || '';
+          const isNumeric = /^\d+$/.test(token);
           
           // Tentar diferentes configurações de câmera
           let mediaStream;
           const constraints = [
-            // Tentativa 1: deviceId específico
-            { video: { deviceId: { exact: cameraIndex.toString() } } },
+            // Tentativa 1: deviceId específico (quando veio deviceId)
+            isNumeric ? null : { video: { deviceId: { exact: token } } },
             // Tentativa 2: deviceId ideal
-            { video: { deviceId: { ideal: cameraIndex.toString() } } },
-            // Tentativa 3: apenas índice
-            { video: { deviceId: cameraIndex.toString() } },
+            isNumeric ? null : { video: { deviceId: { ideal: token } } },
+            // Tentativa 3: apenas índice (quando veio índice)
+            isNumeric ? { video: { deviceId: token } } : null,
             // Tentativa 4: câmera padrão
             { video: true },
             // Tentativa 5: configuração básica
@@ -53,15 +65,22 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '' }: LiveStr
           ];
 
           for (let i = 0; i < constraints.length; i++) {
+            if (!constraints[i]) continue;
             try {
               console.log(`Tentativa ${i + 1} com constraints:`, constraints[i]);
-              mediaStream = await navigator.mediaDevices.getUserMedia(constraints[i]);
+              mediaStream = await navigator.mediaDevices.getUserMedia(constraints[i] as MediaStreamConstraints);
               console.log(`✅ Câmera inicializada com tentativa ${i + 1}`);
               break;
             } catch (error) {
-              console.log(`❌ Tentativa ${i + 1} falhou:`, error.name, error.message);
+              console.log(`❌ Tentativa ${i + 1} falhou:`, (error as any).name, (error as any).message);
               if (i === constraints.length - 1) {
-                throw error;
+                // Fallback final: pedir o padrão simples (sem deviceId)
+                try {
+                  mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                  console.log('✅ Câmera inicializada com fallback padrão');
+                } catch (e2) {
+                  throw e2;
+                }
               }
             }
           }
@@ -107,8 +126,14 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '' }: LiveStr
         console.error('Erro ao inicializar stream:', err);
         setIsLoading(false);
         setIsPlaying(false);
-        setError('Erro ao acessar câmera');
-        toast.error(`Erro ao conectar com ${cameraName}`);
+        if ((err as any)?.name === 'OverconstrainedError') {
+          setError('As configurações solicitadas não são suportadas pela câmera. Selecione outra ou tente padrão.');
+        } else if ((err as any)?.name === 'NotReadableError') {
+          setError('Não foi possível iniciar a webcam (NotReadableError). A detecção no backend ou outro app pode estar usando a câmera.');
+        } else {
+          // Mensagem genérica; o usuário ainda pode tentar novamente
+          setError('Não foi possível iniciar a câmera. Clique em Tentar Novamente.');
+        }
       }
     };
 
@@ -177,7 +202,14 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '' }: LiveStr
   };
 
   const handleSettings = () => {
-    toast.info('Configurações da câmera em desenvolvimento');
+    console.log('🔧 handleSettings chamado, onConfigure:', onConfigure);
+    if (onConfigure) {
+      console.log('🔧 Chamando onConfigure...');
+      onConfigure();
+    } else {
+      console.log('🔧 onConfigure não está definido, mostrando mensagem');
+      toast.info('Configurações da câmera em desenvolvimento');
+    }
   };
 
   return (

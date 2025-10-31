@@ -31,7 +31,9 @@ class WebSocketService {
   private isConnecting = false;
 
   constructor() {
-    this.url = import.meta.env.VITE_WS_URL || 'ws://localhost:8001';
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const wsBase = apiUrl.replace(/^http/, 'ws');
+    this.url = (import.meta.env.VITE_WS_URL as string) || `${wsBase}/ws`;
   }
 
   /**
@@ -144,6 +146,19 @@ class WebSocketService {
    */
   private handleMessage(data: WebSocketMessage): void {
     switch (data.type) {
+      case 'event_created':
+        try {
+          toast.warning('🚨 Intrusão detectada', {
+            description: `Câmera ${data.camera_id || ''}`,
+            duration: 8000
+          });
+          if (this.callbacks.onIntrusionAlert) {
+            this.callbacks.onIntrusionAlert(data);
+          }
+        } catch (e) {
+          // noop
+        }
+        break;
       case 'intrusion_alert':
         this.handleIntrusionAlert(data);
         break;

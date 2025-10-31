@@ -18,7 +18,8 @@ router = APIRouter()
 def create_camera(
     camera: CameraCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(AuthService.get_current_admin_user)
+    # Permitir que qualquer usuário autenticado crie câmera
+    current_user: User = Depends(AuthService.get_current_active_user)
 ):
     """Criar nova câmera"""
     return CameraService.create_camera(db, camera)

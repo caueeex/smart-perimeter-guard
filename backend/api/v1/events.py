@@ -3,8 +3,11 @@ Endpoints de eventos
 """
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+import os
+import shutil
 
 from database import get_db
 from schemas.event import Event, EventCreate, EventUpdate, EventStats, HeatmapData
@@ -12,6 +15,7 @@ from schemas.user import User
 from services.event_service import EventService
 from services.auth_service import AuthService
 from models.event import EventType
+from config import settings
 
 router = APIRouter()
 
@@ -165,4 +169,126 @@ def get_heatmap_data(
     """Obter dados do heatmap"""
     from services.detection_service import detection_service
     return detection_service.get_heatmap_data(camera_id, date_range)
+
+
+@router.post("/screenshot")
+def save_screenshot(
+    file: UploadFile = File(...),
+    area: str = Form(...),
+    object: str = Form(...),
+    timestamp: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(AuthService.get_current_active_user)
+):
+    """Salvar screenshot de intrusão"""
+    try:
+        # Criar diretório de screenshots se não existir
+        screenshots_dir = os.path.join("uploads", "screenshots")
+        os.makedirs(screenshots_dir, exist_ok=True)
+        
+        # Salvar arquivo
+        file_path = os.path.join(screenshots_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Criar evento no banco de dados
+        event_data = EventCreate(
+            camera_id=1,  # Câmera padrão para área de teste
+            event_type="intrusion",
+            description=f"Intrusão detectada na área '{area}' - Objeto: {object}",
+            confidence=0.95,
+            image_path=file_path,
+            detected_objects=[object],
+            bounding_boxes=[],
+            is_processed=True,
+            is_notified=True
+        )
+
+        event = EventService.create_event(db, event_data)
+        return {
+            "message": "Screenshot salvo com sucesso",
+            "file_path": file_path,
+            "event_id": event.id
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao salvar screenshot: {str(e)}"
+        )
+
+
+@router.get("/{event_id}/image")
+def get_event_image(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(AuthService.get_current_active_user)
+):
+    """Servir a imagem do evento por ID com fallback de caminho."""
+    event = EventService.get_event(db, event_id)
+    if not event or not event.image_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagem não encontrada")
+
+    # Normalizar caminho: se vier como URL pública (/uploads/...), mapear para disco
+    image_path = event.image_path
+    try:
+        if image_path.startswith("/uploads/"):
+            # Remover prefixo inicial '/' e basear no settings.upload_dir
+            rel = image_path[len("/uploads/"):]
+            if os.path.sep != '/':
+                rel = rel.replace('/', os.path.sep)
+            abs_path = os.path.join(settings.upload_dir, rel)
+        else:
+            abs_path = image_path
+
+        if not os.path.exists(abs_path):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arquivo não existe")
+        return FileResponse(abs_path, media_type="image/jpeg")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro ao servir imagem: {e}")
+
+
+@router.get("/images/list")
+def list_screenshots(
+    limit: int = Query(20, ge=1, le=200),
+    current_user: User = Depends(AuthService.get_current_active_user)
+):
+    """Listar screenshots mais recentes diretamente do diretório de uploads."""
+    try:
+        shots_dir = os.path.join(settings.upload_dir, 'screenshots')
+        if not os.path.isdir(shots_dir):
+            return []
+        files = [f for f in os.listdir(shots_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        files.sort(key=lambda f: os.path.getmtime(os.path.join(shots_dir, f)), reverse=True)
+        files = files[:limit]
+        return [
+            {
+                'filename': name,
+                'url': f"/uploads/screenshots/{name}",
+                'mtime': os.path.getmtime(os.path.join(shots_dir, name)),
+                'size': os.path.getsize(os.path.join(shots_dir, name)),
+            }
+            for name in files
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar screenshots: {e}")
+
+
+@router.get("/images/{filename}")
+def get_screenshot_file(
+    filename: str,
+    current_user: User = Depends(AuthService.get_current_active_user)
+):
+    """Servir um arquivo de screenshot pelo nome."""
+    try:
+        safe_name = filename.replace('..', '').replace('\\', '/').split('/')[-1]
+        abs_path = os.path.join(settings.upload_dir, 'screenshots', safe_name)
+        if not os.path.exists(abs_path):
+            raise HTTPException(status_code=404, detail='Arquivo não encontrado')
+        return FileResponse(abs_path, media_type='image/jpeg')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao servir arquivo: {e}")
 

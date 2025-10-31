@@ -1,4 +1,4 @@
-import { Shield, LayoutDashboard, Camera, History, Settings, LogOut, Bell } from "lucide-react";
+import { Shield, LayoutDashboard, Camera, History, Settings, LogOut, Bell, TestTube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ const Sidebar = () => {
     { icon: Camera, label: "Câmeras", path: "/cameras" },
     { icon: History, label: "Eventos", path: "/events", badge: 3 },
     { icon: Bell, label: "Notificações", path: "/notifications", badge: 2 },
+    { icon: TestTube, label: "Área de Teste", path: "/test-area" },
     { icon: Settings, label: "Configurações", path: "/settings" },
   ];
 

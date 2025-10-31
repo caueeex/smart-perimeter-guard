@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import Events from "./pages/Events";
 import Cameras from "./pages/Cameras";
 import Notifications from "./pages/Notifications";
+import TestArea from "./pages/TestArea";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -58,6 +59,14 @@ const App = () => (
             element={
               <ProtectedRoute>
                 <Notifications />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/test-area" 
+            element={
+              <ProtectedRoute>
+                <TestArea />
               </ProtectedRoute>
             } 
           />

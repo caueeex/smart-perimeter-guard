@@ -18,6 +18,7 @@ const Events = () => {
   const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
   const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [recentShots, setRecentShots] = useState<Array<{ url: string; filename: string }>>([]);
   const [filters, setFilters] = useState({
     search: '',
     eventType: 'all',
@@ -29,6 +30,22 @@ const Events = () => {
   useEffect(() => {
     loadEvents();
   }, [filters]);
+
+  useEffect(() => {
+    // carregar screenshots recentes para fallback aleatório
+    (async () => {
+      try {
+        const apiBase = getApiBase();
+        const resp = await fetch(`${apiBase}/api/v1/events/images/list`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}` }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setRecentShots((data || []).map((d: any) => ({ url: d.url, filename: d.filename })));
+        }
+      } catch (_) { /* ignore */ }
+    })();
+  }, []);
 
   const loadEvents = async () => {
     try {
@@ -46,6 +63,27 @@ const Events = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getApiBase = () => {
+    const envBase = (import.meta.env.VITE_API_URL as string) || '';
+    if (envBase) return envBase.replace(/\/$/, '');
+    const { protocol, hostname } = window.location;
+    // fallback padrão: backend FastAPI em 8000
+    return `${protocol}//${hostname}:8000`;
+  };
+  const toPublicUrl = (path?: string | null) => {
+    if (!path) return '';
+    if (/^https?:\/\//i.test(path)) return path;
+    // caminho relativo vindo do backend: prefixar com API_URL
+    return `${getApiBase()}${path}`;
+  };
+
+  const getEventImageUrl = (id: number) => `${getApiBase()}/api/v1/events/${id}/image`;
+  const getRandomShotUrl = () => {
+    if (!recentShots.length) return '';
+    const pick = recentShots[Math.floor(Math.random() * recentShots.length)];
+    return toPublicUrl(pick.url);
   };
 
   const getTypeColor = (type: string) => {
@@ -93,7 +131,7 @@ const Events = () => {
   const handleDownload = async (event: EventType) => {
     try {
       if (event.image_path) {
-        const response = await fetch(event.image_path);
+        const response = await fetch(getEventImageUrl(event.id));
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -105,7 +143,7 @@ const Events = () => {
         document.body.removeChild(a);
         toast.success("Imagem baixada com sucesso!");
       } else if (event.video_path) {
-        const response = await fetch(event.video_path);
+        const response = await fetch(toPublicUrl(event.video_path));
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -211,9 +249,13 @@ const Events = () => {
                 <div className="aspect-video bg-muted rounded-lg overflow-hidden relative group">
                   {event.image_path ? (
                     <img 
-                      src={event.image_path} 
+                      src={getEventImageUrl(event.id)} 
                       alt={`Evento ${event.id}`}
                       className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const altUrl = getRandomShotUrl();
+                        if (altUrl) (e.currentTarget as HTMLImageElement).src = altUrl;
+                      }}
                     />
                   ) : (
                     <div className="w-full h-full bg-muted flex items-center justify-center">
@@ -329,9 +371,13 @@ const Events = () => {
           {selectedEvent?.image_path && (
             <div className="relative">
               <img 
-                src={selectedEvent.image_path} 
+                src={getEventImageUrl(selectedEvent.id)} 
                 alt={`Evento ${selectedEvent.id}`}
                 className="w-full h-auto rounded-lg"
+                onError={(e) => {
+                  const altUrl = getRandomShotUrl();
+                  if (altUrl) (e.currentTarget as HTMLImageElement).src = altUrl;
+                }}
               />
               <Button
                 variant="outline"
@@ -358,7 +404,7 @@ const Events = () => {
           {selectedEvent?.video_path && (
             <div className="relative">
               <video 
-                src={selectedEvent.video_path} 
+                src={toPublicUrl(selectedEvent.video_path)} 
                 controls
                 className="w-full h-auto rounded-lg"
               />

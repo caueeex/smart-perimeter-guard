@@ -36,6 +36,7 @@ interface Point {
 }
 
 const CameraConfig = ({ camera, isOpen, onClose, onSave }: CameraConfigProps) => {
+  console.log('CameraConfig renderizado:', { camera, isOpen });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -64,7 +65,9 @@ const CameraConfig = ({ camera, isOpen, onClose, onSave }: CameraConfigProps) =>
 
   // Inicializar stream da câmera
   useEffect(() => {
+    console.log('useEffect inicialização:', { isOpen, stream_url: camera.stream_url });
     if (isOpen && camera.stream_url) {
+      console.log('Inicializando câmera...');
       initializeCamera();
     }
     
@@ -98,8 +101,10 @@ const CameraConfig = ({ camera, isOpen, onClose, onSave }: CameraConfigProps) =>
   }, [camera]);
 
   const initializeCamera = async () => {
+    console.log('Iniciando initializeCamera com URL:', camera.stream_url);
     try {
       if (camera.stream_url.startsWith('webcam://')) {
+        console.log('Detectado stream webcam');
         const cameraIndex = parseInt(camera.stream_url.split('://')[1]);
         
         // Tentar diferentes configurações de câmera

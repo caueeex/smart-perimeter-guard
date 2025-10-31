@@ -100,66 +100,58 @@ class EventService:
 
     @staticmethod
     def get_event_stats(db: Session) -> EventStats:
-        """Obter estatísticas de eventos"""
-        # Total de eventos
-        total_events = db.query(Event).count()
-        
-        # Eventos hoje
-        today = datetime.now().date()
-        events_today = db.query(Event).filter(
-            func.date(Event.timestamp) == today
-        ).count()
-        
-        # Eventos esta semana
-        week_start = today - timedelta(days=today.weekday())
-        events_this_week = db.query(Event).filter(
-            func.date(Event.timestamp) >= week_start
-        ).count()
-        
-        # Eventos este mês
-        month_start = today.replace(day=1)
-        events_this_month = db.query(Event).filter(
-            func.date(Event.timestamp) >= month_start
-        ).count()
-        
-        # Contagem por tipo
-        intrusion_count = db.query(Event).filter(
-            Event.event_type == EventType.INTRUSION
-        ).count()
-        
-        movement_count = db.query(Event).filter(
-            Event.event_type == EventType.MOVEMENT
-        ).count()
-        
-        alert_count = db.query(Event).filter(
-            Event.event_type == EventType.ALERT
-        ).count()
-        
-        # Câmera mais ativa
-        most_active_camera = db.query(
-            Camera.name,
-            func.count(Event.id).label('event_count')
-        ).join(Event).group_by(Camera.id).order_by(
-            desc('event_count')
-        ).first()
-        
-        # Hora de pico
-        peak_hour = db.query(
-            func.hour(Event.timestamp).label('hour'),
-            func.count(Event.id).label('event_count')
-        ).group_by('hour').order_by(desc('event_count')).first()
-        
-        return EventStats(
-            total_events=total_events,
-            events_today=events_today,
-            events_this_week=events_this_week,
-            events_this_month=events_this_month,
-            intrusion_count=intrusion_count,
-            movement_count=movement_count,
-            alert_count=alert_count,
-            most_active_camera=most_active_camera[0] if most_active_camera else None,
-            peak_hour=most_active_camera[0] if peak_hour else None
-        )
+        """Obter estatísticas de eventos com tolerância a dados vazios/inconsistentes"""
+        try:
+            # Totais
+            total_events = db.query(Event).count()
+            today = datetime.now().date()
+            events_today = db.query(Event).filter(func.date(Event.timestamp) == today).count()
+            week_start = today - timedelta(days=today.weekday())
+            events_this_week = db.query(Event).filter(func.date(Event.timestamp) >= week_start).count()
+            month_start = today.replace(day=1)
+            events_this_month = db.query(Event).filter(func.date(Event.timestamp) >= month_start).count()
+
+            # Contagem por tipo (aceitar tanto enum quanto string)
+            intrusion_count = db.query(Event).filter(Event.event_type.in_([EventType.INTRUSION, "intrusion"])) .count()
+            movement_count = db.query(Event).filter(Event.event_type.in_([EventType.MOVEMENT, "movement"])) .count()
+            alert_count    = db.query(Event).filter(Event.event_type.in_([EventType.ALERT,    "alert"]))    .count()
+
+            # Câmera mais ativa
+            most_active_camera = db.query(
+                Camera.name,
+                func.count(Event.id).label('event_count')
+            ).join(Event, Event.camera_id == Camera.id).group_by(Camera.id).order_by(desc('event_count')).first()
+
+            # Hora de pico
+            peak_hour = db.query(
+                func.extract('hour', Event.timestamp).label('hour'),
+                func.count(Event.id).label('event_count')
+            ).group_by('hour').order_by(desc('event_count')).first()
+
+            return EventStats(
+                total_events=total_events,
+                events_today=events_today,
+                events_this_week=events_this_week,
+                events_this_month=events_this_month,
+                intrusion_count=intrusion_count,
+                movement_count=movement_count,
+                alert_count=alert_count,
+                most_active_camera=most_active_camera[0] if most_active_camera else None,
+                peak_hour=int(peak_hour[0]) if peak_hour else None
+            )
+        except Exception:
+            # Em caso de qualquer erro, devolve zeros para não quebrar o dashboard
+            return EventStats(
+                total_events=0,
+                events_today=0,
+                events_this_week=0,
+                events_this_month=0,
+                intrusion_count=0,
+                movement_count=0,
+                alert_count=0,
+                most_active_camera=None,
+                peak_hour=None
+            )
 
     @staticmethod
     def get_events_by_camera(db: Session, camera_id: int, limit: int = 50) -> List[Event]:

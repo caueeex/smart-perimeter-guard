@@ -7,6 +7,7 @@ from .webcam import router as webcam_router
 from .stream import router as stream_router
 from .detection import router as detection_router
 from .monitoring import router as monitoring_router
+from .youtube import router as youtube_router
 
 api_router = APIRouter()
 
@@ -17,3 +18,4 @@ api_router.include_router(webcam_router, prefix="/webcam", tags=["webcam"])
 api_router.include_router(stream_router, prefix="/stream", tags=["stream"])
 api_router.include_router(detection_router, prefix="/detection", tags=["detection"])
 api_router.include_router(monitoring_router, prefix="/monitoring", tags=["monitoring"])
+api_router.include_router(youtube_router, prefix="/youtube", tags=["youtube"])
