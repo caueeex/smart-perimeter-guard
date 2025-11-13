@@ -194,9 +194,9 @@ def test_detection(
                     "frame_captured": False
                 }
             
-            # Testar detecção YOLO
+            # Testar detecção YOLO usando método público
             sensitivity = camera.sensitivity / 100.0
-            objects = detection_service._detect_objects_yolo(frame, sensitivity)
+            objects = detection_service.test_detection(frame, sensitivity)
             
             # Testar verificação de intrusão
             has_line = camera.detection_line is not None
@@ -205,9 +205,9 @@ def test_detection(
             
             if objects:
                 # Converter objetos para formato esperado pelo tracking
-                tracked_objects = detection_service._track_objects(frame, camera_id, objects)
+                tracked_objects = detection_service.test_tracking(frame, camera_id, objects)
                 if tracked_objects:
-                    intrusion_detected = detection_service._check_advanced_intrusion(
+                    intrusion_detected = detection_service.test_intrusion_check(
                         frame, tracked_objects, camera.detection_line, camera.detection_zone
                     )
             

@@ -1,0 +1,350 @@
+================================================================================
+                    RELATÓRIO DE TESTE DE CARGA
+                    Sistema SecureVision
+================================================================================
+
+Data/Hora: [Data e hora da execução do teste]
+Ambiente: Desenvolvimento/Teste
+Versão do Sistema: 1.0.0
+
+================================================================================
+1. CONFIGURAÇÃO DO TESTE
+================================================================================
+
+O teste de carga foi executado com as seguintes configurações:
+
+- Usuários Concorrentes: 10 usuários simultâneos
+- Requisições por Usuário: 10 requisições por usuário
+- Total de Requisições: 100 requisições
+- Tempo de Ramp-up: 10 segundos (tempo para escalar gradualmente os usuários)
+- Duração Total do Teste: 66.79 segundos
+
+Descrição: O teste simula 10 usuários simultâneos, cada um executando 10 
+requisições sequenciais aos endpoints da API. O ramp-up de 10 segundos permite 
+que os usuários sejam iniciados gradualmente, simulando um cenário mais realista.
+
+================================================================================
+2. RESUMO EXECUTIVO
+================================================================================
+
+RESULTADOS GERAIS:
+------------------
+Tempo Total de Execução: 66.79 segundos
+Total de Requisições Executadas: 100 requisições
+Requisições Bem-Sucedidas: 100 requisições
+Requisições com Falha: 0 requisições
+Taxa de Sucesso: 100.00%
+Taxa de Requisições por Segundo (RPS): 1.50 requisições/segundo
+
+ANÁLISE INICIAL:
+----------------
+O sistema demonstrou excelente estabilidade durante o teste de carga, 
+alcançando 100% de taxa de sucesso. Todas as 100 requisições foram 
+processadas com sucesso, sem nenhuma falha ou erro. Isso indica que o 
+sistema está funcionando de forma estável sob a carga testada.
+
+================================================================================
+3. ANÁLISE DE DESEMPENHO - TEMPO DE RESPOSTA
+================================================================================
+
+MÉTRICAS GLOBAIS DE TEMPO DE RESPOSTA:
+--------------------------------------
+Tempo Médio de Resposta: 2.084 segundos
+Tempo Mediano de Resposta: 2.085 segundos
+Tempo Mínimo de Resposta: 2.038 segundos
+Tempo Máximo de Resposta: 2.119 segundos
+Desvio Padrão: 0.016 segundos
+
+INTERPRETAÇÃO:
+--------------
+O tempo médio de resposta de 2.084 segundos está acima do ideal para APIs 
+REST modernas, que geralmente devem responder em menos de 1 segundo. O 
+desvio padrão muito baixo (0.016s) indica que os tempos de resposta são 
+muito consistentes, sem grandes variações entre requisições.
+
+Observações:
+- Os tempos de resposta são consistentes (baixa variabilidade)
+- Todos os endpoints apresentam tempos similares (~2 segundos)
+- Não há outliers significativos (diferença entre min e max é pequena)
+
+================================================================================
+4. ANÁLISE DETALHADA POR ENDPOINT
+================================================================================
+
+4.1. GET /api/v1/cameras/ - Listar Câmeras
+-------------------------------------------
+Total de Requisições: 40 requisições (40% do total)
+Taxa de Sucesso: 100.0% (40 sucessos, 0 falhas)
+Tempo Médio de Resposta: 2.084 segundos
+Tempo Mediano: 2.084 segundos
+Tempo Mínimo: 2.038 segundos
+Tempo Máximo: 2.116 segundos
+
+Análise: Este é o endpoint mais utilizado durante o teste (40 requisições). 
+O tempo de resposta médio de 2.084 segundos sugere que a consulta ao banco 
+de dados pode estar demorando. Recomenda-se verificar:
+- Índices nas tabelas de câmeras
+- Otimização da query SQL
+- Possibilidade de implementar cache
+
+4.2. GET /api/v1/cameras/stats/summary - Estatísticas de Câmeras
+------------------------------------------------------------------
+Total de Requisições: 30 requisições (30% do total)
+Taxa de Sucesso: 100.0% (30 sucessos, 0 falhas)
+Tempo Médio de Resposta: 2.085 segundos
+Tempo Mediano: 2.086 segundos
+Tempo Mínimo: 2.055 segundos
+Tempo Máximo: 2.119 segundos
+
+Análise: Este endpoint realiza agregações no banco de dados (contagens, 
+estatísticas), o que pode explicar o tempo de resposta similar aos outros. 
+O tempo médio de 2.085 segundos indica que as queries de agregação podem 
+ser otimizadas. Recomendações:
+- Verificar índices nas colunas usadas para filtros
+- Considerar materialização de views para estatísticas frequentes
+- Implementar cache para resultados de estatísticas
+
+4.3. GET /api/v1/events/ - Listar Eventos
+------------------------------------------
+Total de Requisições: 20 requisições (20% do total)
+Taxa de Sucesso: 100.0% (20 sucessos, 0 falhas)
+Tempo Médio de Resposta: 2.080 segundos
+Tempo Mediano: 2.077 segundos
+Tempo Mínimo: 2.055 segundos
+Tempo Máximo: 2.104 segundos
+
+Análise: Este endpoint apresenta o melhor tempo médio entre os endpoints 
+testados (2.080s), ainda assim acima do ideal. A consulta de eventos pode 
+estar sendo otimizada pela ordenação por timestamp. Recomendações:
+- Verificar índice na coluna timestamp
+- Considerar paginação mais eficiente
+- Avaliar necessidade de filtros adicionais
+
+4.4. POST /api/v1/cameras/ - Criar Câmera
+-----------------------------------------
+Total de Requisições: 10 requisições (10% do total)
+Taxa de Sucesso: 100.0% (10 sucessos, 0 falhas)
+Tempo Médio de Resposta: 2.092 segundos
+Tempo Mediano: 2.090 segundos
+Tempo Mínimo: 2.059 segundos
+Tempo Máximo: 2.109 segundos
+
+Análise: Este é o endpoint mais lento do teste (2.092s), o que é esperado 
+para operações de escrita no banco de dados. O tempo inclui validação, 
+inserção no banco e possível inicialização de monitoramento. 
+Recomendações:
+- Verificar se a inicialização do monitoramento está bloqueando a resposta
+- Considerar processamento assíncrono para operações pesadas
+- Otimizar transações do banco de dados
+
+================================================================================
+5. GARGALOS IDENTIFICADOS
+================================================================================
+
+RANKING DOS ENDPOINTS MAIS LENTOS:
+-----------------------------------
+1. POST /api/v1/cameras/ - 2.092 segundos (10 requisições)
+2. GET /api/v1/cameras/stats/summary - 2.085 segundos (30 requisições)
+3. GET /api/v1/cameras/ - 2.084 segundos (40 requisições)
+4. GET /api/v1/events/ - 2.080 segundos (20 requisições)
+
+ANÁLISE DOS GARGALOS:
+---------------------
+Todos os endpoints apresentam tempos de resposta muito similares (~2 segundos), 
+o que sugere que o gargalo pode estar em um componente comum do sistema, 
+possivelmente:
+
+1. CONEXÃO COM BANCO DE DADOS:
+   - Latência de rede entre aplicação e banco
+   - Pool de conexões insuficiente
+   - Queries não otimizadas
+
+2. PROCESSAMENTO DA APLICAÇÃO:
+   - Serialização/deserialização JSON
+   - Validação de schemas Pydantic
+   - Autenticação/autorização
+
+3. INFRAESTRUTURA:
+   - Recursos limitados do servidor (CPU, memória)
+   - Configurações do servidor web (Uvicorn)
+
+O fato de todos os endpoints terem tempos similares indica que o problema 
+não está em queries específicas, mas em um componente compartilhado.
+
+================================================================================
+6. CÓDIGOS DE STATUS HTTP
+================================================================================
+
+DISTRIBUIÇÃO DE STATUS CODES:
+------------------------------
+200 OK: 90 requisições (90.0%)
+201 Created: 10 requisições (10.0%)
+
+ANÁLISE:
+--------
+A distribuição de códigos de status está correta:
+- 200 OK: Respostas bem-sucedidas para operações GET
+- 201 Created: Respostas bem-sucedidas para operações POST (criação)
+
+Não foram encontrados códigos de erro (4xx ou 5xx), confirmando a 
+estabilidade do sistema durante o teste.
+
+================================================================================
+7. TAXA DE REQUISIÇÕES POR SEGUNDO (RPS)
+================================================================================
+
+RPS OBSERVADO: 1.50 requisições por segundo
+
+ANÁLISE:
+--------
+A taxa de 1.50 RPS é relativamente baixa para uma API REST moderna. Isso 
+pode ser explicado por:
+
+1. Tempo de resposta alto (~2 segundos por requisição)
+2. Delay entre requisições no teste (0.1s)
+3. Ramp-up gradual dos usuários (10 segundos)
+
+CÁLCULO TEÓRICO:
+----------------
+Com 10 usuários simultâneos e tempo médio de resposta de 2.084s:
+- Capacidade teórica: 10 usuários / 2.084s ≈ 4.8 requisições/segundo
+- RPS observado: 1.50 requisições/segundo
+
+A diferença entre teórico e observado pode ser devido ao delay entre 
+requisições e ao comportamento sequencial dos usuários no teste.
+
+================================================================================
+8. RECOMENDAÇÕES E MELHORIAS
+================================================================================
+
+8.1. OTIMIZAÇÃO IMEDIATA (Alta Prioridade)
+-------------------------------------------
+1. INVESTIGAR LATÊNCIA DO BANCO DE DADOS:
+   - Verificar tempo de resposta das queries SQL
+   - Analisar plano de execução das queries
+   - Verificar conexões e pool de conexões
+   - Considerar uso de connection pooling mais eficiente
+
+2. IMPLEMENTAR CACHE:
+   - Cache para GET /cameras/ (listagem de câmeras)
+   - Cache para GET /cameras/stats/summary (estatísticas)
+   - Cache para GET /events/ (listagem de eventos)
+   - TTL apropriado para cada tipo de dado
+
+3. OTIMIZAR QUERIES:
+   - Adicionar índices nas colunas frequentemente consultadas
+   - Revisar queries N+1
+   - Usar select_related/prefetch_related quando apropriado
+   - Considerar denormalização para estatísticas
+
+8.2. MELHORIAS DE MÉDIO PRAZO (Média Prioridade)
+-------------------------------------------------
+1. PROCESSAMENTO ASSÍNCRONO:
+   - Mover inicialização de monitoramento para background
+   - Usar filas (Redis, RabbitMQ) para tarefas pesadas
+   - Implementar workers assíncronos
+
+2. OTIMIZAÇÃO DE SERIALIZAÇÃO:
+   - Revisar schemas Pydantic (usar model_validate quando possível)
+   - Minimizar dados retornados nas respostas
+   - Considerar compressão de respostas (gzip)
+
+3. MONITORAMENTO E PROFILING:
+   - Implementar APM (Application Performance Monitoring)
+   - Adicionar logging de tempo de execução por componente
+   - Usar ferramentas de profiling (cProfile, py-spy)
+
+8.3. MELHORIAS DE LONGO PRAZO (Baixa Prioridade)
+-------------------------------------------------
+1. ESCALABILIDADE HORIZONTAL:
+   - Implementar load balancing
+   - Considerar múltiplas instâncias da aplicação
+   - Usar banco de dados read replicas
+
+2. ARQUITETURA:
+   - Considerar separação de serviços (microserviços)
+   - Implementar API Gateway
+   - Usar CDN para conteúdo estático
+
+3. INFRAESTRUTURA:
+   - Otimizar configurações do servidor (Uvicorn workers)
+   - Considerar uso de servidores mais performáticos
+   - Implementar auto-scaling
+
+================================================================================
+9. CONCLUSÃO
+================================================================================
+
+O teste de carga executado demonstrou que o sistema SecureVision apresenta:
+
+PONTOS POSITIVOS:
+-----------------
+✓ Estabilidade excelente (100% de taxa de sucesso)
+✓ Consistência nos tempos de resposta (baixa variabilidade)
+✓ Nenhum erro ou falha durante o teste
+✓ Comportamento previsível sob carga
+
+ÁREAS DE MELHORIA:
+------------------
+⚠ Tempo de resposta acima do ideal (~2 segundos vs <1 segundo desejado)
+⚠ Taxa de requisições por segundo relativamente baixa (1.50 RPS)
+⚠ Possível gargalo em componente comum (banco de dados ou serialização)
+
+RECOMENDAÇÃO GERAL:
+-------------------
+O sistema está funcional e estável, mas requer otimizações para melhorar 
+o desempenho. As melhorias mais impactantes serão:
+
+1. Investigar e otimizar a latência do banco de dados
+2. Implementar cache para endpoints de leitura frequentes
+3. Otimizar queries SQL e adicionar índices apropriados
+
+Com essas otimizações, é esperado que o tempo de resposta médio reduza 
+para menos de 1 segundo, aumentando significativamente a capacidade do 
+sistema (RPS).
+
+PRÓXIMOS PASSOS:
+----------------
+1. Executar profiling detalhado para identificar componente específico lento
+2. Implementar cache para endpoints de leitura
+3. Otimizar queries do banco de dados
+4. Re-executar teste de carga após otimizações
+5. Comparar resultados antes/depois das melhorias
+
+================================================================================
+10. INFORMAÇÕES TÉCNICAS ADICIONAIS
+================================================================================
+
+CONFIGURAÇÃO DO AMBIENTE DE TESTE:
+-----------------------------------
+- Servidor: localhost:8000
+- Framework: FastAPI
+- Banco de Dados: MySQL
+- Método de Teste: Threading (Python ThreadPoolExecutor)
+- Autenticação: JWT Bearer Token
+
+LIMITAÇÕES DO TESTE:
+--------------------
+- Teste executado em ambiente local (não reflete latência de rede real)
+- Uso de threads Python (GIL pode limitar concorrência real)
+- Não simula comportamento real de usuários (sem pensar/esperar)
+- Testa apenas alguns endpoints principais
+- Não inclui testes de WebSocket ou streaming
+
+SUGESTÕES PARA PRÓXIMOS TESTES:
+--------------------------------
+- Teste de carga com mais usuários (50, 100, 200)
+- Teste de stress (aumentar carga até falhar)
+- Teste de spike (aumento súbito de carga)
+- Teste de endurance (carga constante por período prolongado)
+- Teste distribuído (múltiplas máquinas gerando carga)
+- Monitoramento de recursos do servidor (CPU, memória, I/O)
+
+================================================================================
+FIM DO RELATÓRIO
+================================================================================
+
+Este relatório foi gerado automaticamente pelo sistema de teste de carga 
+do SecureVision. Para mais informações, consulte a documentação em 
+backend/tests/README_LOAD_TEST.md
+

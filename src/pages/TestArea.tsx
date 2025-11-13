@@ -21,7 +21,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Layout from "@/components/Layout";
 import { toast } from "sonner";
-import { cameraService, youtubeService, eventService } from "@/services/api";
+import { cameraService, eventService } from "@/services/api";
 import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
@@ -64,20 +64,6 @@ const TestArea = () => {
   const [areaName, setAreaName] = useState("");
   const [showNameInput, setShowNameInput] = useState(false);
   const [detectionResults, setDetectionResults] = useState<DetectionResult | null>(null);
-  const [uploadedVideo, setUploadedVideo] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string>("");
-  const [isVideoMode, setIsVideoMode] = useState(false);
-  const [youtubeUrl, setYoutubeUrl] = useState<string>("");
-  const [isYoutubeMode, setIsYoutubeMode] = useState(false);
-  const [downloadedVideos, setDownloadedVideos] = useState<Array<{
-    filename: string;
-    size: number;
-    size_mb: number;
-    created_at: string;
-    stream_url: string;
-  }>>([]);
-  const [selectedVideo, setSelectedVideo] = useState<string>("");
-  const [selectedCameraForVideo, setSelectedCameraForVideo] = useState<string>("");
   const [alerts, setAlerts] = useState<Array<{
     id: string;
     message: string;
@@ -100,7 +86,6 @@ const TestArea = () => {
   // Carregar câmeras do backend
   useEffect(() => {
     loadCameras();
-    loadDownloadedVideos();
   }, []);
 
   // Carregar modelo de detecção
@@ -128,98 +113,14 @@ const TestArea = () => {
   }, []);
 
   // Iniciar stream automaticamente quando uma câmera for selecionada
-  // MAS APENAS se NÃO estiver em modo vídeo
   useEffect(() => {
-    // Não iniciar câmera se estiver em modo vídeo
-    if (isVideoMode || selectedVideo) {
-      console.log("Modo vídeo ativo - não iniciar câmera automaticamente");
-      return;
-    }
-    
     if (selectedCamera && availableCameras.length > 0) {
       const camera = availableCameras.find(c => c.id.toString() === selectedCamera);
       if (camera && camera.status === 'online' && camera.detection_enabled) {
         startCameraStream(camera);
       }
     }
-  }, [selectedCamera, availableCameras, isVideoMode, selectedVideo]);
-
-  const loadDownloadedVideos = async () => {
-    try {
-      // Verificar se o backend está online antes de tentar carregar
-      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      
-      // Criar controller para timeout manual (AbortSignal.timeout pode não estar disponível)
-      let healthController: AbortController | null = null;
-      let healthTimeout: NodeJS.Timeout | null = null;
-      
-      try {
-        healthController = new AbortController();
-        healthTimeout = setTimeout(() => healthController!.abort(), 3000); // 3 segundos
-        
-        const healthResponse = await fetch(`${apiBaseUrl}/health`, {
-          method: 'GET',
-          signal: healthController.signal
-        });
-        
-        if (healthTimeout) clearTimeout(healthTimeout);
-        
-        if (!healthResponse.ok) {
-          console.warn("Backend health check falhou - não carregando vídeos");
-          return;
-        }
-      } catch (healthError: any) {
-        if (healthTimeout) clearTimeout(healthTimeout);
-        if (healthError.name === 'AbortError') {
-          console.warn("Backend não respondeu em 3 segundos - pode estar offline");
-        } else {
-          console.warn("Backend parece estar offline - não carregando vídeos:", healthError.message);
-        }
-        return;
-      }
-      
-      // Se health check passou, tentar carregar vídeos com timeout menor
-      console.log("✅ Backend está online, carregando lista de vídeos...");
-      
-      const videosController = new AbortController();
-      const videosTimeout = setTimeout(() => videosController.abort(), 8000); // 8 segundos
-      
-      try {
-        const result = await Promise.race([
-          youtubeService.listVideos(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout ao carregar vídeos')), 8000)
-          )
-        ]);
-        
-        clearTimeout(videosTimeout);
-        
-        if (result && result.success && result.videos) {
-          setDownloadedVideos(result.videos);
-          console.log(`✅ ${result.videos.length} vídeo(s) baixado(s) carregado(s):`, result.videos);
-          
-          if (result.videos.length === 0) {
-            console.log("ℹ️ Nenhum vídeo encontrado na pasta temp_videos");
-          }
-        } else {
-          console.log("ℹ️ Endpoint retornou sem vídeos:", result);
-          setDownloadedVideos([]);
-        }
-      } catch (videosError: any) {
-        clearTimeout(videosTimeout);
-        if (videosError.name === 'AbortError' || videosError.message?.includes('timeout')) {
-          console.warn("⏱️ Timeout ao carregar lista de vídeos (8s)");
-        } else {
-          console.warn("⚠️ Erro ao carregar vídeos:", videosError.message);
-        }
-        setDownloadedVideos([]);
-      }
-    } catch (error: any) {
-      console.warn("⚠️ Não foi possível carregar vídeos baixados:", error.message);
-      // Não mostrar erro ao usuário, apenas deixar lista vazia
-      setDownloadedVideos([]);
-    }
-  };
+  }, [selectedCamera, availableCameras]);
 
   const loadCameras = async () => {
     try {
@@ -331,10 +232,7 @@ const TestArea = () => {
       console.log("Detecção não iniciada:", {
         isMonitoring,
         hasModel: !!detectionModelRef.current,
-        hasVideo: !!videoRef.current,
-        isVideoMode,
-        selectedVideo,
-        hasVideoUrl: !!videoUrl
+        hasVideo: !!videoRef.current
       });
       return;
     }
@@ -348,16 +246,9 @@ const TestArea = () => {
           console.log("Vídeo não está pronto:", {
             hasVideo: !!video,
             videoWidth: video?.videoWidth,
-            videoHeight: video?.videoHeight,
-            isVideoMode,
-            videoSrc: video?.src
+            videoHeight: video?.videoHeight
           });
           return;
-        }
-
-        // Se estiver em modo vídeo, garantir que está reproduzindo
-        if (isVideoMode && video.paused) {
-          video.play().catch(console.error);
         }
 
         console.log("Detectando objetos no vídeo...");
@@ -426,7 +317,6 @@ const TestArea = () => {
               };
               
               setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Manter apenas 10 alertas
-              toast.error(`Intrusão detectada na área ${area.name}!`);
               
               // Atualizar contador de intrusões
               setTestAreas(prev => prev.map(a => 
@@ -438,26 +328,26 @@ const TestArea = () => {
               // Capturar screenshot
               captureScreenshot(area.name, obj.class);
 
-              // Registrar evento no backend (com throttle de 3s para evitar spam)
-              const nowTs = Date.now();
-              if (nowTs - lastEventAtRef.current > 3000) {
-                lastEventAtRef.current = nowTs;
-                (async () => {
-                  try {
-                    const cameraIdNum = parseInt((selectedCameraForVideo || selectedCamera) || '0', 10);
-                    await eventService.createEvent({
-                      camera_id: isNaN(cameraIdNum) ? undefined : cameraIdNum,
-                      event_type: 'intrusion',
-                      description: `Intrusão detectada na área "${area.name}" (${obj.class})`,
-                      confidence: obj.confidence,
-                      detected_objects: [{ class: obj.class, confidence: obj.confidence, center: obj.center }],
-                      bounding_boxes: [obj.bbox]
-                    });
-                  } catch (e) {
-                    console.warn('Falha ao registrar evento no backend:', e);
-                  }
-                })();
-              }
+                    // Registrar evento no backend (com throttle de 3s para evitar spam)
+                    const nowTs = Date.now();
+                    if (nowTs - lastEventAtRef.current > 3000) {
+                      lastEventAtRef.current = nowTs;
+                      (async () => {
+                        try {
+                          const cameraIdNum = parseInt(selectedCamera || '0', 10);
+                          await eventService.createEvent({
+                            camera_id: isNaN(cameraIdNum) ? undefined : cameraIdNum,
+                            event_type: 'intrusion',
+                            description: `Intrusão detectada na área "${area.name}" (${obj.class})`,
+                            confidence: obj.confidence,
+                            detected_objects: [{ class: obj.class, confidence: obj.confidence, center: obj.center }],
+                            bounding_boxes: [obj.bbox]
+                          });
+                        } catch (e) {
+                          console.warn('Falha ao registrar evento no backend:', e);
+                        }
+                      })();
+                    }
             }
           });
         });
@@ -478,7 +368,7 @@ const TestArea = () => {
       rafId = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(rafId);
-  }, [isMonitoring, testAreas, isVideoMode, videoUrl, selectedVideo]);
+  }, [isMonitoring, testAreas]);
 
   // Função para verificar se um ponto está dentro de um polígono
   const isPointInPolygon = (point: [number, number], polygon: Point[]): boolean => {
@@ -629,28 +519,24 @@ const TestArea = () => {
       return;
     }
     
-    // Se não há vídeo carregado, precisa de câmera
-    if (!isVideoMode && !selectedCamera) {
-      toast.error("Selecione uma câmera ou carregue um vídeo antes de iniciar o monitoramento!");
+    if (!selectedCamera) {
+      toast.error("Selecione uma câmera antes de iniciar o monitoramento!");
       return;
     }
     
-    // Se estiver em modo vídeo, garantir que há uma câmera selecionada para associar eventos
-    if (isVideoMode && !selectedCameraForVideo && !selectedCamera) {
-      toast.warning("⚠️ Selecione uma câmera para associar os eventos de detecção!");
-      // Continuar mesmo assim, mas avisar
+    const camera = availableCameras.find(c => c.id.toString() === selectedCamera);
+    
+    if (!camera) {
+      toast.error("Câmera não encontrada!");
+      return;
     }
     
-    // Usar câmera do vídeo se disponível, senão usar câmera padrão
-    const cameraIdToUse = selectedCameraForVideo || selectedCamera;
-    const camera = availableCameras.find(c => c.id.toString() === cameraIdToUse);
-    
-    if (camera && camera.status === 'offline') {
+    if (camera.status === 'offline') {
       toast.error("A câmera selecionada está offline!");
       return;
     }
     
-    if (camera && !camera.detection_enabled) {
+    if (!camera.detection_enabled) {
       toast.error("A detecção está desabilitada para esta câmera!");
       return;
     }
@@ -660,29 +546,13 @@ const TestArea = () => {
       return;
     }
     
-    // Iniciar stream da câmera ou vídeo
-    if (isVideoMode && videoUrl) {
-      // Modo vídeo carregado
-      if (videoRef.current) {
-        console.log("Carregando vídeo com URL:", videoUrl);
-        videoRef.current.src = videoUrl;
-        videoRef.current.load();
-        // Tentar reproduzir
-        videoRef.current.play().catch(err => {
-          console.error("Erro ao reproduzir vídeo:", err);
-          toast.error("Erro ao reproduzir vídeo. Verifique a URL.");
-        });
-      }
-    } else {
-      // Modo câmera ao vivo
-      await startCameraStream(camera);
-    }
+    // Iniciar stream da câmera
+    await startCameraStream(camera);
     
-    // Aguardar um pouco para o vídeo carregar
+    // Aguardar um pouco para a câmera carregar
     setTimeout(() => {
       setIsMonitoring(true);
-      const mode = isVideoMode ? "vídeo carregado" : camera?.name;
-      toast.success(`Monitoramento iniciado com ${mode}! 🚀`);
+      toast.success(`Monitoramento iniciado com ${camera.name}!`);
       console.log("Monitoramento iniciado!");
       
       // Forçar primeira detecção após 2 segundos
@@ -703,12 +573,6 @@ const TestArea = () => {
 
   const startCameraStream = async (camera: any) => {
     try {
-      // NÃO iniciar câmera se estiver em modo vídeo
-      if (isVideoMode || selectedVideo) {
-        console.log("⚠️ Tentativa de iniciar câmera bloqueada - modo vídeo ativo");
-        return;
-      }
-      
       if (!videoRef.current) return;
       
       const video = videoRef.current;
@@ -741,25 +605,12 @@ const TestArea = () => {
         
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         
-        // Verificar novamente se não entrou em modo vídeo enquanto aguardava
-        if (isVideoMode || selectedVideo) {
-          stream.getTracks().forEach(track => track.stop());
-          console.log("Stream cancelado - modo vídeo ativado durante espera");
-          return;
-        }
-        
         video.srcObject = stream;
         
         // Aguardar o vídeo carregar
         video.onloadedmetadata = () => {
-          if (!isVideoMode && !selectedVideo) {
-            video.play();
-            toast.success(`✅ ${camera.name} conectada com sucesso!`);
-          } else {
-            // Se entrou em modo vídeo durante o carregamento, parar stream
-            stream.getTracks().forEach(track => track.stop());
-            video.srcObject = null;
-          }
+          video.play();
+          toast.success(`${camera.name} conectada com sucesso!`);
         };
         
         video.onerror = () => {
@@ -851,133 +702,6 @@ const TestArea = () => {
     setAlerts([]);
   };
 
-  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.type.startsWith('video/')) {
-        setUploadedVideo(file);
-        const url = URL.createObjectURL(file);
-        setVideoUrl(url);
-        setIsVideoMode(true);
-        toast.success(`Vídeo carregado: ${file.name}`);
-      } else {
-        toast.error("Por favor, selecione um arquivo de vídeo válido.");
-      }
-    }
-  };
-
-  const switchToLiveCamera = () => {
-    // PARAR VÍDEO se estiver rodando
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.src = "";
-      videoRef.current.load();
-      
-      // Se tiver srcObject (câmera), limpar também
-      if (videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-        videoRef.current.srcObject = null;
-      }
-    }
-    
-    setIsVideoMode(false);
-    setIsYoutubeMode(false);
-    setVideoUrl("");
-    setUploadedVideo(null);
-    setYoutubeUrl("");
-    setSelectedVideo(""); // Limpar seleção de vídeo também
-    
-    toast.info("Modo câmera ao vivo ativado");
-    
-    // Reiniciar câmera se houver uma selecionada
-    if (selectedCamera && availableCameras.length > 0) {
-      const camera = availableCameras.find(c => c.id.toString() === selectedCamera);
-      if (camera) {
-        setTimeout(() => startCameraStream(camera), 500);
-      }
-    }
-  };
-
-  const switchToVideoMode = () => {
-    if (videoUrl) {
-      setIsVideoMode(true);
-      setIsYoutubeMode(false);
-      toast.info("Modo vídeo ativado");
-    } else {
-      toast.error("Nenhum vídeo carregado. Faça upload primeiro.");
-    }
-  };
-
-  const extractYouTubeId = (url: string): string | null => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
-  };
-
-  const handleYouTubeUrl = async () => {
-    if (!youtubeUrl.trim()) {
-      toast.error("Digite uma URL do YouTube válida");
-      return;
-    }
-
-    const videoId = extractYouTubeId(youtubeUrl);
-    if (!videoId) {
-      toast.error("URL do YouTube inválida. Use um link como: https://www.youtube.com/watch?v=VIDEO_ID");
-      return;
-    }
-
-    try {
-      toast.info("🔄 Processando vídeo do YouTube...");
-      
-      // Processar URL através do proxy
-      const result = await youtubeService.processUrl(youtubeUrl);
-      
-      if (result.success && result.stream_url) {
-        // Garantir que a URL está completa (com baseURL da API)
-        const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const fullStreamUrl = result.stream_url.startsWith('http') 
-          ? result.stream_url 
-          : `${apiBaseUrl}${result.stream_url}`;
-        
-        console.log("URL completa do stream:", fullStreamUrl);
-        
-        // Definir URL do vídeo
-        setVideoUrl(fullStreamUrl);
-        setIsYoutubeMode(false); // Não é mais modo YouTube, é vídeo local
-        setIsVideoMode(true);
-        
-        // Aguardar um pouco e então carregar o vídeo
-        setTimeout(() => {
-          if (videoRef.current) {
-            videoRef.current.src = fullStreamUrl;
-            videoRef.current.load();
-            videoRef.current.play().catch(err => {
-              console.error("Erro ao reproduzir vídeo:", err);
-              toast.error("Erro ao reproduzir vídeo. Verifique se o arquivo foi baixado corretamente.");
-            });
-          }
-        }, 500);
-        
-        toast.success(`✅ Vídeo processado: ${result.video_info?.title || 'YouTube Video'}`);
-        console.log("Vídeo processado:", result);
-      } else {
-        toast.error(`❌ Erro ao processar vídeo: ${result.error || 'Erro desconhecido'}`);
-      }
-    } catch (error: any) {
-      console.error("Erro ao processar YouTube:", error);
-      toast.error(`❌ Erro ao processar vídeo: ${error.message}`);
-    }
-  };
-
-  const switchToYouTubeMode = async () => {
-    if (youtubeUrl) {
-      await handleYouTubeUrl();
-    } else {
-      toast.error("Digite uma URL do YouTube primeiro.");
-    }
-  };
-
   const captureScreenshot = async (areaName: string, objectClass: string) => {
     try {
       const canvas = canvasRef.current;
@@ -986,8 +710,7 @@ const TestArea = () => {
       if (!canvas || !video) return;
 
       // Obter ID da câmera para associar ao evento
-      const cameraIdToUse = selectedCameraForVideo || selectedCamera;
-      const camera = availableCameras.find(c => c.id.toString() === cameraIdToUse);
+      const camera = availableCameras.find(c => c.id.toString() === selectedCamera);
 
       // Criar um canvas temporário para capturar a imagem
       const tempCanvas = document.createElement('canvas');
@@ -1032,9 +755,6 @@ const TestArea = () => {
         formData.append('camera_id', camera.id.toString());
         formData.append('camera_name', camera.name);
       }
-      if (selectedVideo) {
-        formData.append('video_source', selectedVideo);
-      }
 
       const response = await fetch('/api/v1/events/screenshot', {
         method: 'POST',
@@ -1066,14 +786,12 @@ const TestArea = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       // Desenhar vídeo como fundo se disponível
-      // Verificar se é vídeo de arquivo (src) ou stream de câmera (srcObject)
-      const hasVideoSource = (video && video.videoWidth > 0 && video.videoHeight > 0) && 
-                             (isVideoMode || selectedVideo || video.srcObject);
+      const hasVideoSource = video && video.videoWidth > 0 && video.videoHeight > 0 && video.srcObject;
       
       if (hasVideoSource) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      } else if (!isVideoMode && !selectedVideo) {
-        // Fundo padrão apenas se não estiver em modo vídeo
+      } else {
+        // Fundo padrão
         ctx.fillStyle = '#2a2a2a';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
@@ -1083,14 +801,6 @@ const TestArea = () => {
           ctx.textAlign = 'center';
           ctx.fillText('Selecione uma câmera e inicie o monitoramento', canvas.width/2, canvas.height/2);
         }
-      } else if ((isVideoMode || selectedVideo) && (!video || video.videoWidth === 0)) {
-        // Se está em modo vídeo mas vídeo não carregou ainda
-        ctx.fillStyle = '#2a2a2a';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '18px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Carregando vídeo...', canvas.width/2, canvas.height/2);
       }
       
       // Desenhar áreas existentes
@@ -1221,7 +931,7 @@ const TestArea = () => {
     };
     
     animate();
-  }, [testAreas, currentPoints, detectionResults, isMonitoring, isVideoMode]);
+  }, [testAreas, currentPoints, detectionResults, isMonitoring]);
 
   return (
     <Layout>
@@ -1363,374 +1073,19 @@ const TestArea = () => {
                       {detectionResults.objects.length} objetos
                     </Badge>
                   )}
-                  {isVideoMode && (
-                    <Badge variant="secondary" className="bg-blue-600">
-                      Modo Vídeo
-                    </Badge>
-                  )}
                 </div>
               </div>
               
-              {/* Seção de Upload de Vídeo e YouTube */}
-              <div className="mb-4 p-4 bg-muted rounded-lg">
-                <h4 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-                  <Video className="w-4 h-4" />
-                  Vídeo para Teste de Detecção
-                </h4>
-                
-                <div className="space-y-4">
-                  {/* Upload de arquivo */}
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-2 block">Upload de Arquivo</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="file"
-                        accept="video/*"
-                        onChange={handleVideoUpload}
-                        className="flex-1"
-                        placeholder="Selecione um vídeo de invasão"
-                      />
-                      {uploadedVideo && (
-                        <Button onClick={switchToVideoMode} size="sm" variant="outline">
-                          Usar Vídeo
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* URL do YouTube */}
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-2 block">URL do YouTube</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="url"
-                        placeholder="https://www.youtube.com/watch?v=VIDEO_ID"
-                        value={youtubeUrl}
-                        onChange={(e) => setYoutubeUrl(e.target.value)}
-                        className="flex-1"
-                      />
-                      <Button onClick={switchToYouTubeMode} size="sm" variant="outline">
-                        Usar YouTube
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Vídeos Baixados */}
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-2 block">Vídeo Baixado (Pasta do Servidor)</Label>
-                    <div className="flex items-center gap-2">
-                      <Select value={selectedVideo} onValueChange={setSelectedVideo}>
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder="Selecione um vídeo baixado..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {downloadedVideos.length === 0 ? (
-                            <SelectItem value="no-videos" disabled>
-                              Nenhum vídeo disponível
-                            </SelectItem>
-                          ) : (
-                            downloadedVideos.map((video) => (
-                              <SelectItem key={video.filename} value={video.filename}>
-                                <div className="flex flex-col">
-                                  <span>{video.filename}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {video.size_mb} MB • {new Date(video.created_at).toLocaleDateString('pt-BR')}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <Button 
-                        onClick={async () => {
-                          if (!selectedVideo) {
-                            toast.error("Selecione um vídeo primeiro");
-                            return;
-                          }
-                          const video = downloadedVideos.find(v => v.filename === selectedVideo);
-                          if (!video) return;
-
-                          // PARAR A STREAM DA CÂMERA SE ESTIVER RODANDO
-                          if (videoRef.current && videoRef.current.srcObject) {
-                            const stream = videoRef.current.srcObject as MediaStream;
-                            stream.getTracks().forEach(track => {
-                              track.stop();
-                              console.log("Track da câmera parado:", track.kind);
-                            });
-                            videoRef.current.srcObject = null;
-                            console.log("Stream da câmera parado");
-                          }
-
-                          // Limpar src anterior
-                          if (videoRef.current) {
-                            videoRef.current.src = "";
-                            videoRef.current.load();
-                          }
-
-                          const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-                          const fullStreamUrl = `${apiBaseUrl}${video.stream_url}`;
-                          
-                          console.log("Carregando vídeo:", fullStreamUrl);
-                          
-                          setVideoUrl(fullStreamUrl);
-                          setIsVideoMode(true);
-                          setIsYoutubeMode(false);
-                          
-                          // Aguardar um pouco e então carregar o vídeo
-                          setTimeout(async () => {
-                            if (!videoRef.current) return;
-                            
-                            const video = videoRef.current;
-                            
-                            // Garantir que srcObject está vazio
-                            video.srcObject = null;
-                            
-                            // Primeiro, verificar se o arquivo existe fazendo uma requisição HEAD
-                            try {
-                              const token = localStorage.getItem('access_token');
-                              const headers: HeadersInit = {
-                                'Content-Type': 'application/json',
-                              };
-                              if (token) {
-                                headers['Authorization'] = `Bearer ${token}`;
-                              }
-                              
-                              const headResponse = await fetch(fullStreamUrl, {
-                                method: 'HEAD',
-                                headers: headers
-                              });
-                              
-                              if (!headResponse.ok) {
-                                if (headResponse.status === 401) {
-                                  toast.error("❌ Erro de autenticação. Faça login novamente.");
-                                  return;
-                                } else if (headResponse.status === 404) {
-                                  toast.error(`❌ Vídeo não encontrado: ${selectedVideo || 'arquivo'}`);
-                                  return;
-                                } else {
-                                  toast.error(`❌ Erro ao acessar vídeo (${headResponse.status})`);
-                                  return;
-                                }
-                              }
-                              
-                              console.log("✅ Arquivo de vídeo existe no servidor");
-                              
-                              // Construir URL com token se necessário para o elemento video
-                              // O elemento video não envia headers customizados, então precisamos
-                              // usar uma URL diferente ou token na query string
-                              let videoUrlWithAuth = fullStreamUrl;
-                              if (token && !fullStreamUrl.includes('token=')) {
-                                // Adicionar token como query parameter (se o backend suportar)
-                                const separator = fullStreamUrl.includes('?') ? '&' : '?';
-                                videoUrlWithAuth = `${fullStreamUrl}${separator}token=${token}`;
-                              }
-                              
-                              // Configurar eventos do vídeo ANTES de definir src
-                              let retriedWithoutToken = false;
-                              const cleanupVideoListeners = () => {
-                                video.onloadeddata = null;
-                                video.onloadedmetadata = null;
-                                video.onerror = null;
-                              };
-
-                              video.onloadeddata = () => {
-                                console.log("✅ Vídeo carregado com sucesso");
-                                cleanupVideoListeners();
-                                video.play().catch(err => {
-                                  console.error("Erro ao reproduzir vídeo:", err);
-                                  toast.error("Erro ao reproduzir vídeo.");
-                                });
-                              };
-
-                              video.oncanplay = () => {
-                                console.log("🎬 canplay: vídeo pronto para iniciar");
-                                video.play().catch(() => {});
-                              };
-
-                              video.onplaying = () => {
-                                console.log("▶️ playing: vídeo em reprodução");
-                              };
-
-                              video.onerror = async () => {
-                                console.error("❌ Erro no elemento video. URL tentada:", video.src);
-                                if (token && !retriedWithoutToken && video.src.includes('token=')) {
-                                  retriedWithoutToken = true;
-                                  console.log("Tentando novamente sem token na URL...");
-                                  // Trocar para URL sem token apenas uma vez
-                                  video.src = fullStreamUrl;
-                                  return;
-                                }
-
-                                // Fallback final: baixar como blob e tocar via ObjectURL
-                                try {
-                                  console.log("↘️ Fallback: baixando arquivo como blob...");
-                                  const authToken = localStorage.getItem('access_token');
-                                  const blobResp = await fetch(fullStreamUrl + (authToken ? `?token=${authToken}` : ''), {
-                                    // Forçar download completo
-                                    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : undefined,
-                                    cache: 'no-store'
-                                  });
-                                  if (!blobResp.ok) throw new Error(`HTTP ${blobResp.status}`);
-                                  const blob = await blobResp.blob();
-                                  const objectUrl = URL.createObjectURL(blob);
-                                  cleanupVideoListeners();
-                                  video.onloadeddata = () => {
-                                    URL.revokeObjectURL(objectUrl);
-                                    video.play().catch(() => {});
-                                  };
-                                  video.srcObject = null;
-                                  video.src = objectUrl;
-                                } catch (blobErr: any) {
-                                  console.error("❌ Fallback blob falhou:", blobErr);
-                                  cleanupVideoListeners();
-                                  toast.error("Não foi possível carregar o vídeo.");
-                                }
-                              };
-
-                              video.onloadedmetadata = () => {
-                                console.log("✅ Metadados do vídeo carregados");
-                                console.log("Duração:", video.duration, "segundos");
-                                console.log("Dimensões:", video.videoWidth, "x", video.videoHeight);
-                              };
-
-                              // Carregar o vídeo (uma única vez)
-                              video.src = videoUrlWithAuth;
-                              
-                            } catch (fetchError: any) {
-                              console.error("Erro ao verificar arquivo:", fetchError);
-                              toast.error(`Erro ao verificar vídeo: ${fetchError.message}`);
-                            }
-                          }, 300);
-                          
-                          toast.success(`✅ Vídeo "${video.filename}" carregado`);
-                        }} 
-                        size="sm" 
-                        variant="outline"
-                        disabled={!selectedVideo}
-                      >
-                        Usar Vídeo
-                      </Button>
-                      <Button 
-                        onClick={loadDownloadedVideos} 
-                        size="sm" 
-                        variant="ghost"
-                        title="Atualizar lista de vídeos"
-                      >
-                        ↻
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Câmera para Vídeo */}
-                  {(isVideoMode || selectedVideo) && (
-                    <div>
-                      <Label className="text-xs text-muted-foreground mb-2 block">Câmera para Detecção</Label>
-                      <Select 
-                        value={selectedCameraForVideo || selectedCamera} 
-                        onValueChange={(value) => {
-                          setSelectedCameraForVideo(value);
-                          setSelectedCamera(value);
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione a câmera..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableCameras.length === 0 ? (
-                            <SelectItem value="no-cameras" disabled>
-                              Nenhuma câmera disponível
-                            </SelectItem>
-                          ) : (
-                            availableCameras.map((camera) => (
-                              <SelectItem key={camera.id} value={camera.id.toString()}>
-                                <div className="flex items-center gap-2">
-                                  <div className={`w-2 h-2 rounded-full ${
-                                    camera.status === 'online' ? 'bg-green-500' : 
-                                    camera.status === 'maintenance' ? 'bg-yellow-500' : 'bg-red-500'
-                                  }`} />
-                                  <span>{camera.name}</span>
-                                  {camera.location && (
-                                    <span className="text-muted-foreground text-xs">({camera.location})</span>
-                                  )}
-                                </div>
-                              </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {selectedCameraForVideo && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Esta câmera será usada para associar os eventos de detecção
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Controles */}
-                  <div className="flex items-center gap-2">
-                    {(isVideoMode || isYoutubeMode) && (
-                      <Button onClick={switchToLiveCamera} size="sm" variant="outline">
-                        Câmera ao Vivo
-                      </Button>
-                    )}
-                    {isYoutubeMode && (
-                      <Badge variant="secondary" className="bg-red-600">
-                        YouTube
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  {/* Informações */}
-                  {uploadedVideo && (
-                    <div className="text-sm text-muted-foreground">
-                      <p><strong>Arquivo:</strong> {uploadedVideo.name}</p>
-                      <p><strong>Tamanho:</strong> {(uploadedVideo.size / 1024 / 1024).toFixed(2)} MB</p>
-                      <p><strong>Tipo:</strong> {uploadedVideo.type}</p>
-                      {isVideoMode && !isYoutubeMode && (
-                        <p className="text-green-600 font-medium">✅ Vídeo carregado e reproduzindo</p>
-                      )}
-                    </div>
-                  )}
-
-                  {isYoutubeMode && (
-                    <div className="text-sm text-muted-foreground">
-                      <p><strong>YouTube:</strong> {youtubeUrl}</p>
-                      <p className="text-green-600 font-medium">✅ Vídeo do YouTube processado e pronto para detecção</p>
-                    </div>
-                  )}
-
-                  {selectedVideo && (
-                    <div className="text-sm text-muted-foreground">
-                      <p><strong>Vídeo selecionado:</strong> {selectedVideo}</p>
-                      {selectedCameraForVideo && (
-                        <p><strong>Câmera associada:</strong> {availableCameras.find(c => c.id.toString() === selectedCameraForVideo)?.name || 'Nenhuma'}</p>
-                      )}
-                      {isVideoMode && (
-                        <p className="text-green-600 font-medium">✅ Vídeo carregado e pronto para detecção</p>
-                      )}
-                    </div>
-                  )}
-                  
-                  <div className="text-xs text-muted-foreground">
-                    💡 <strong>Dica:</strong> Agora você pode usar URLs do YouTube diretamente! O sistema baixa e processa automaticamente.
-                  </div>
-                </div>
-              </div>
-              
-              <div className="relative">
-                {/* Video da câmera ou vídeo carregado */}
+              <div className="relative w-full flex justify-center items-center">
+                {/* Video da câmera */}
                 <video
                   ref={videoRef}
                   width={800}
                   height={600}
-                  className={(isVideoMode || selectedVideo) ? "border border-border rounded-lg" : "hidden"}
+                  className="hidden"
                   autoPlay
                   muted
                   playsInline
-                  controls
-                  preload="auto"
-                  src={(isVideoMode || selectedVideo) ? videoUrl : undefined}
                 />
                 
                 {/* Canvas sobreposto para desenho e detecção */}
@@ -1738,13 +1093,14 @@ const TestArea = () => {
                   ref={canvasRef}
                   width={800}
                   height={600}
-                  className="border border-border rounded-lg cursor-crosshair absolute top-0 left-0 bg-transparent"
+                  className="border border-border rounded-lg cursor-crosshair w-full max-w-full h-auto relative"
+                  style={{ maxWidth: '800px', maxHeight: '600px' }}
                   onClick={handleCanvasClick}
                   onMouseMove={handleCanvasMouseMove}
                 />
                 
                 {/* Controles de Desenho */}
-                <div className="absolute top-4 left-4 flex gap-2">
+                <div className="absolute top-4 left-4 z-10 flex gap-2">
                   {!isDrawing ? (
                     <Button onClick={startDrawing} size="sm" variant="outline">
                       <MapPin className="w-4 h-4 mr-2" />
@@ -1766,7 +1122,7 @@ const TestArea = () => {
                 
                 {/* Input para nome da área */}
                 {showNameInput && (
-                  <div className="absolute top-16 left-4 bg-white p-4 rounded-lg shadow-lg border border-border">
+                  <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-lg border border-border">
                     <div className="space-y-3">
                       <div>
                         <Label htmlFor="areaName" className="text-sm font-medium">

@@ -11,8 +11,6 @@ from websockets.server import WebSocketServerProtocol
 
 from config import settings
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Armazenar conexões WebSocket
