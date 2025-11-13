@@ -1,13 +1,21 @@
 """
 Serviço de gerenciamento de câmeras
 """
+import os
+import logging
+import traceback
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
 from models.camera import Camera
+from models.event import Event
 from schemas.camera import CameraCreate, CameraUpdate
 from services.detection_service import detection_service
+from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class CameraService:
@@ -82,17 +90,105 @@ class CameraService:
     @staticmethod
     def delete_camera(db: Session, camera_id: int) -> bool:
         """Deletar câmera"""
-        db_camera = db.query(Camera).filter(Camera.id == camera_id).first()
-        if not db_camera:
-            return False
+        try:
+            db_camera = db.query(Camera).filter(Camera.id == camera_id).first()
+            if not db_camera:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Câmera não encontrada"
+                )
 
-        # Parar monitoramento
-        detection_service.stop_monitoring(camera_id)
+            # Parar monitoramento
+            try:
+                detection_service.stop_monitoring(camera_id)
+            except Exception as e:
+                logger.warning(f"Erro ao parar monitoramento da câmera {camera_id}: {e}")
 
-        # Deletar câmera
-        db.delete(db_camera)
-        db.commit()
-        return True
+            # Deletar eventos relacionados primeiro (para evitar erro de Foreign Key)
+            # Primeiro, buscar eventos para remover arquivos associados
+            events = db.query(Event).filter(Event.camera_id == camera_id).all()
+            logger.info(f"Encontrados {len(events)} eventos para deletar da câmera {camera_id}")
+            
+            # Remover arquivos dos eventos antes de deletar do banco
+            for event in events:
+                # Remover arquivos associados aos eventos
+                # Tratar caminhos relativos (/uploads/...) e absolutos
+                if event.image_path:
+                    image_path = event.image_path
+                    try:
+                        # Se for caminho relativo começando com /uploads/
+                        if image_path.startswith("/uploads/"):
+                            rel_path = image_path[len("/uploads/"):]
+                            # Normalizar separadores de caminho para Windows
+                            if os.path.sep != '/':
+                                rel_path = rel_path.replace('/', os.path.sep)
+                            image_path = os.path.join(settings.upload_dir, rel_path)
+                        elif not os.path.isabs(image_path):
+                            # Caminho relativo sem /uploads/
+                            image_path = os.path.join(settings.upload_dir, image_path)
+                        
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
+                            logger.debug(f"Imagem removida: {image_path}")
+                    except Exception as e:
+                        logger.warning(f"Erro ao remover imagem do evento {event.id} ({image_path}): {e}")
+                
+                if event.video_path:
+                    video_path = event.video_path
+                    try:
+                        # Se for caminho relativo começando com /uploads/
+                        if video_path.startswith("/uploads/"):
+                            rel_path = video_path[len("/uploads/"):]
+                            # Normalizar separadores de caminho para Windows
+                            if os.path.sep != '/':
+                                rel_path = rel_path.replace('/', os.path.sep)
+                            video_path = os.path.join(settings.upload_dir, rel_path)
+                        elif not os.path.isabs(video_path):
+                            # Caminho relativo sem /uploads/
+                            video_path = os.path.join(settings.upload_dir, video_path)
+                        
+                        if os.path.exists(video_path):
+                            os.remove(video_path)
+                            logger.debug(f"Vídeo removido: {video_path}")
+                    except Exception as e:
+                        logger.warning(f"Erro ao remover vídeo do evento {event.id} ({video_path}): {e}")
+            
+            # Deletar eventos do banco usando delete direto (mais eficiente)
+            deleted_count = db.query(Event).filter(Event.camera_id == camera_id).delete()
+            logger.info(f"{deleted_count} eventos deletados do banco de dados")
+            
+            # Fazer commit dos eventos deletados ANTES de deletar a câmera
+            if deleted_count > 0:
+                db.commit()
+                logger.info(f"Commit realizado para {deleted_count} eventos deletados")
+            
+            # Deletar câmera
+            db.delete(db_camera)
+            db.commit()
+            logger.info(f"Câmera {camera_id} deletada com sucesso")
+            return True
+            
+        except HTTPException:
+            # Re-raise HTTP exceptions (como 404)
+            raise
+        except IntegrityError as e:
+            db.rollback()
+            error_trace = traceback.format_exc()
+            logger.error(f"Erro de integridade ao deletar câmera {camera_id}: {e}")
+            logger.error(f"Traceback completo:\n{error_trace}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao deletar câmera: {str(e)}"
+            )
+        except Exception as e:
+            db.rollback()
+            error_trace = traceback.format_exc()
+            logger.error(f"Erro ao deletar câmera {camera_id}: {e}")
+            logger.error(f"Traceback completo:\n{error_trace}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao deletar câmera: {str(e)}"
+            )
 
     @staticmethod
     def update_camera_status(db: Session, camera_id: int, status: str) -> Optional[Camera]:

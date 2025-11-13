@@ -1,0 +1,48 @@
+{
+  "test_config": {
+    "num_users": 100,
+    "requests_per_user": 1,
+    "total_requests": 100,
+    "ramp_up_time": 1
+  },
+  "summary": {
+    "total_time": 51.77456879615784,
+    "total_requests": 100,
+    "success_count": 100,
+    "fail_count": 0,
+    "success_rate": 100.0,
+    "requests_per_second": 1.931450175736103
+  },
+  "response_time": {
+    "avg": 2.079013924598694,
+    "median": 2.0788328647613525,
+    "min": 2.050078868865967,
+    "max": 2.1713802814483643,
+    "std": 0.016783275036340552
+  },
+  "endpoint_metrics": {
+    "GET /cameras/": {
+      "count": 100,
+      "success_count": 100,
+      "fail_count": 0,
+      "success_rate": 100.0,
+      "avg_response_time": 2.079013924598694,
+      "median_response_time": 2.0788328647613525,
+      "min_response_time": 2.050078868865967,
+      "max_response_time": 2.1713802814483643,
+      "std_response_time": 0.016783275036340552
+    }
+  },
+  "bottlenecks": [
+    {
+      "endpoint": "GET /cameras/",
+      "avg_response_time": 2.079013924598694,
+      "count": 100
+    }
+  ],
+  "status_codes": {
+    "200": 100
+  },
+  "errors": [],
+  "timestamp": "2025-11-06T21:31:10.244876"
+}

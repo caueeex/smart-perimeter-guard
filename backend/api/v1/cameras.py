@@ -76,12 +76,7 @@ def delete_camera(
     current_user: User = Depends(AuthService.get_current_admin_user)
 ):
     """Deletar câmera"""
-    success = CameraService.delete_camera(db, camera_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Câmera não encontrada"
-        )
+    CameraService.delete_camera(db, camera_id)
     return {"message": "Câmera deletada com sucesso"}
 
 

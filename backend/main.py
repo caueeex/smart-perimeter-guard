@@ -1,21 +1,29 @@
 """
 Aplicação principal FastAPI
 """
+import logging
+import os
+import uvicorn
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-import uvicorn
-import os
+from sqlalchemy.orm import Session
 
 from config import settings
-from database import create_tables
+from database import create_tables, SessionLocal
 from api.v1 import api_router
-from sqlalchemy.orm import Session
-from database import SessionLocal
 from models.camera import Camera
 from services.detection_service import detection_service
 from websocket_manager import manager
+
+# Configuração centralizada de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Criar aplicação FastAPI
 app = FastAPI(
@@ -52,16 +60,16 @@ if os.path.exists(settings.upload_dir):
 @app.on_event("startup")
 async def startup_event():
     """Eventos de inicialização"""
-    print("🚀 Iniciando SecureVision...")
+    logger.info("Iniciando SecureVision...")
     
     # Criar tabelas do banco
     create_tables()
-    print("✅ Tabelas do banco criadas")
+    logger.info("Tabelas do banco criadas")
     
     # Criar diretórios necessários
     os.makedirs(os.path.join(settings.upload_dir, "screenshots"), exist_ok=True)
     os.makedirs(os.path.join(settings.upload_dir, "videos"), exist_ok=True)
-    print("✅ Diretórios criados")
+    logger.info("Diretórios criados")
     
     # Iniciar monitoramento para todas as câmeras com detecção habilitada
     try:
@@ -74,19 +82,19 @@ async def startup_event():
                     detection_service.start_monitoring(cam.id, cam.stream_url)
                     started += 1
                 except Exception as e:
-                    print(f"Falha ao iniciar detecção para câmera {cam.id}: {e}")
+                    logger.error(f"Falha ao iniciar detecção para câmera {cam.id}: {e}")
         db.close()
-        print(f"✅ Detecção iniciada para {started} câmera(s)")
+        logger.info(f"Detecção iniciada para {started} câmera(s)")
     except Exception as e:
-        print(f"⚠️ Não foi possível iniciar detecção automática: {e}")
+        logger.warning(f"Não foi possível iniciar detecção automática: {e}")
 
-    print("🎯 SecureVision iniciado com sucesso!")
+    logger.info("SecureVision iniciado com sucesso!")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Eventos de finalização"""
-    print("🛑 Parando SecureVision...")
+    logger.info("Parando SecureVision...")
     
     # Parar todos os monitoramentos
     try:
@@ -94,9 +102,9 @@ async def shutdown_event():
         for camera_id in list(detection_service.active_monitors.keys()):
             detection_service.stop_monitoring(camera_id)
     except Exception as e:
-        print(f"Erro ao parar monitoramentos: {e}")
+        logger.error(f"Erro ao parar monitoramentos: {e}")
     
-    print("✅ SecureVision parado com sucesso!")
+    logger.info("SecureVision parado com sucesso!")
 
 
 @app.get("/")
