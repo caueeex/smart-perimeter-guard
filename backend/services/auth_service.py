@@ -145,6 +145,40 @@ class AuthService:
         return current_user
 
     @staticmethod
+    def get_current_user_optional(
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+        db: Session = Depends(get_db)
+    ) -> Optional[User]:
+        """Obter usuário atual opcionalmente (não lança exceção se não autenticado)"""
+        if not credentials:
+            return None
+        
+        try:
+            token = credentials.credentials
+            # Usar verify_token mas sem lançar exceção
+            credentials_exception = HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            token_data = AuthService.verify_token(token, credentials_exception)
+            
+            # Buscar usuário por email (como em get_current_user)
+            user = db.query(User).filter(User.email == token_data.email).first()
+            if user is None:
+                return None
+            return user if user.is_active else None
+        except (JWTError, HTTPException):
+            return None
+
+    @staticmethod
+    def get_current_active_user_optional(
+        current_user: Optional[User] = Depends(get_current_user_optional)
+    ) -> Optional[User]:
+        """Obter usuário ativo atual opcionalmente"""
+        return current_user
+
+    @staticmethod
     def get_current_admin_user(current_user: User = Depends(get_current_active_user)) -> User:
         """Obter usuário admin atual"""
         if current_user.role != "admin":

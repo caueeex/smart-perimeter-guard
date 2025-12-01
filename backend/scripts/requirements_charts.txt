@@ -1,0 +1,6 @@
+# Dependências adicionais para geração de gráficos do artigo
+matplotlib>=3.7.0
+seaborn>=0.12.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+

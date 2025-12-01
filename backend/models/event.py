@@ -20,7 +20,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True, index=True)
-    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
+    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=True)  # Permitir NULL para eventos sem câmera
     event_type = Column(String(50), nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     description = Column(Text, nullable=True)

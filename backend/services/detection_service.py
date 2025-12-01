@@ -50,20 +50,74 @@ class DetectionService:
         self.load_model()
 
     def load_model(self):
-        """Carregar modelo YOLO"""
+        """Carregar modelo YOLO com suporte para PyTorch 2.6+"""
         try:
-            # Tentar carregar o modelo preferido; se falhar, usar o yolov8n padrão
+            import torch
             from ultralytics import YOLO
-            model_path = settings.model_path if os.path.exists(settings.model_path) else 'yolov8n.pt'
-            logger.info(f"Carregando modelo YOLO de: {model_path}")
+            
+            # Configurar PyTorch para permitir carregar modelos YOLO (PyTorch 2.6+)
+            # Adicionar globals seguros para ultralytics
             try:
-                self.model = YOLO(model_path)
-            except Exception as inner_e:
-                logger.warning(f"Falha ao carregar {model_path} ({inner_e}), tentando yolov8n.pt padrão")
-                self.model = YOLO('yolov8n.pt')
-            logger.info("Modelo YOLO carregado com sucesso")
+                from ultralytics.nn.tasks import DetectionModel
+                torch.serialization.add_safe_globals([DetectionModel])
+                logger.debug("Globals seguros adicionados para ultralytics")
+            except (ImportError, AttributeError) as e:
+                # Se não conseguir importar ou método não existir, tentar carregar mesmo assim
+                logger.debug(f"Não foi possível adicionar globals seguros: {e}")
+            
+            # Verificar caminhos possíveis
+            possible_paths = [
+                settings.model_path,
+                "./models/yolov8n.pt",
+                "yolov8n.pt",
+                os.path.join(os.path.dirname(__file__), "..", "models", "yolov8n.pt")
+            ]
+            
+            model_loaded = False
+            for model_path in possible_paths:
+                if os.path.exists(model_path):
+                    try:
+                        logger.info(f"Tentando carregar modelo YOLO de: {model_path}")
+                        # YOLO já lida com weights_only internamente nas versões mais recentes
+                        self.model = YOLO(model_path)
+                        logger.info(f"✅ Modelo YOLO carregado com sucesso de: {model_path}")
+                        model_loaded = True
+                        break
+                    except Exception as inner_e:
+                        error_msg = str(inner_e)
+                        logger.warning(f"Falha ao carregar {model_path}: {error_msg[:200]}")
+                        # Verificar se é erro de weights_only (PyTorch 2.6+)
+                        if "weights_only" in error_msg or "WeightsUnpickler" in error_msg:
+                            logger.warning("⚠️ Erro relacionado a PyTorch 2.6+ weights_only")
+                            logger.warning("💡 Solução: pip install --upgrade ultralytics")
+                        continue
+            
+            # Se nenhum arquivo local funcionou, tentar baixar automaticamente
+            if not model_loaded:
+                try:
+                    logger.warning("Nenhum modelo local encontrado, tentando baixar yolov8n.pt automaticamente...")
+                    # YOLO nas versões mais recentes já lida com PyTorch 2.6+
+                    self.model = YOLO('yolov8n.pt')
+                    logger.info("✅ Modelo YOLO baixado e carregado com sucesso")
+                    model_loaded = True
+                except Exception as download_e:
+                    error_msg = str(download_e)
+                    if "weights_only" in error_msg or "WeightsUnpickler" in error_msg:
+                        logger.error("❌ Erro: PyTorch 2.6+ requer atualização do ultralytics")
+                        logger.error("💡 Solução 1 (Recomendado): pip install --upgrade ultralytics")
+                        logger.error("💡 Solução 2: pip install 'torch<2.6'")
+                        logger.error("💡 Solução 3: Baixar modelo manualmente de https://github.com/ultralytics/assets/releases")
+                    else:
+                        logger.error(f"❌ Erro ao baixar/carregar modelo YOLO: {error_msg[:200]}")
+                    self.model = None
+            
+            if not model_loaded:
+                logger.error("❌ CRÍTICO: Modelo YOLO não pôde ser carregado! Detecção não funcionará.")
+                logger.error("💡 Dica: Tente executar: pip install --upgrade ultralytics")
+                self.model = None
+                
         except Exception as e:
-            logger.error(f"Erro ao carregar modelo YOLO: {e}")
+            logger.error(f"❌ Erro crítico ao carregar modelo YOLO: {e}", exc_info=True)
             self.model = None
     
     def _parse_config(self, config) -> Optional[Dict]:
@@ -92,6 +146,7 @@ class DetectionService:
     def start_monitoring(self, camera_id: int, stream_url: str):
         """Iniciar monitoramento de câmera"""
         if camera_id in self.active_monitors:
+            logger.info(f"Parando monitoramento existente da câmera {camera_id} antes de reiniciar")
             self.stop_monitoring(camera_id)
 
         self.active_monitors[camera_id] = True
@@ -119,7 +174,15 @@ class DetectionService:
         )
         self.camera_threads[camera_id] = thread
         thread.start()
-        logger.info(f"Monitoramento avançado iniciado para câmera {camera_id}")
+        logger.info(f"✅ Monitoramento avançado INICIADO para câmera {camera_id} - URL: {stream_url}")
+    
+    def is_monitoring_active(self, camera_id: int) -> bool:
+        """Verificar se monitoramento está ativo para uma câmera"""
+        return self.active_monitors.get(camera_id, False)
+    
+    def get_active_monitors(self) -> List[int]:
+        """Obter lista de IDs de câmeras com monitoramento ativo"""
+        return [cam_id for cam_id, active in self.active_monitors.items() if active]
 
     def stop_monitoring(self, camera_id: int):
         """Parar monitoramento de câmera"""
@@ -223,7 +286,13 @@ class DetectionService:
                     # Verificar cooldown
                     time_since_last = current_time - self.last_detection_time.get(camera_id, 0)
                     if time_since_last < self.detection_cooldown:
+                        if frame_count % 30 == 0:
+                            logger.debug(f"Câmera {camera_id}: Em cooldown ({self.detection_cooldown - time_since_last:.1f}s restantes)")
                         continue
+                    
+                    # Log periódico para debug
+                    if frame_count % 30 == 0:
+                        logger.info(f"📹 Câmera {camera_id}: Processando frame {frame_count} (zona={'✅' if detection_zone else '❌'}, linha={'✅' if detection_line else '❌'})")
                     
                     # Detecção avançada
                     intrusion_detected = self._advanced_detection(
@@ -231,13 +300,11 @@ class DetectionService:
                     )
                     
                     if intrusion_detected:
-                        logger.warning(f"INTRUSÃO DETECTADA na câmera {camera_id}")
+                        logger.warning(f"🚨🚨🚨 INTRUSÃO DETECTADA na câmera {camera_id} 🚨🚨🚨")
                         self.last_detection_time[camera_id] = current_time
                         self._handle_intrusion_advanced(
                             db, camera_id, frame, current_time
                         )
-                    elif frame_count % 30 == 0:  # Log a cada ~2 segundos quando processando
-                        logger.debug(f"Câmera {camera_id}: Processando frame {frame_count}, sem intrusão detectada")
 
                 # Controle de FPS
                 time.sleep(1.0 / 15)  # 15 FPS
@@ -255,6 +322,10 @@ class DetectionService:
                            bg_subtractor, kernel) -> bool:
         """Detecção avançada combinando YOLO e análise de movimento"""
         try:
+            # Parse das configurações uma vez
+            line_config = self._parse_config(detection_line)
+            zone_config = self._parse_config(detection_zone)
+            
             # 1. Detecção de movimento com background subtraction
             motion_detected = self._detect_motion(frame, bg_subtractor, kernel)
             if motion_detected:
@@ -263,21 +334,65 @@ class DetectionService:
             # 2. Detecção de objetos com YOLO (se disponível)
             objects = self._detect_objects_yolo(frame, sensitivity) if self.model else []
             if objects:
-                logger.debug(f"YOLO detectou {len(objects)} objeto(s) na câmera {camera_id}: {[obj['class'] for obj in objects]}")
+                logger.info(f"🔍 YOLO detectou {len(objects)} objeto(s) na câmera {camera_id}: {[obj['class'] for obj in objects]}")
+                # Log detalhado dos objetos
+                for obj in objects:
+                    logger.debug(f"  - {obj['class']}: conf={obj['confidence']:.2f}, area={obj['area']}, center=({obj['center'][0]}, {obj['center'][1]})")
             
-            # 3. Rastreamento de objetos
-            tracked_objects = self._track_objects(frame, camera_id, objects)
-            if tracked_objects:
-                logger.debug(f"{len(tracked_objects)} objeto(s) sendo rastreado(s) na câmera {camera_id}")
+            # 3. Se há zona configurada, verificar objetos YOLO diretamente
+            # IMPORTANTE: Se há zona configurada, SÓ acionar se objeto estiver DENTRO da zona
+            if zone_config and objects:
+                zone_intrusion_found = False
+                for obj in objects:
+                    # Verificar se objeto está na zona
+                    if self._check_zone_intrusion(obj['center'], zone_config, frame.shape):
+                        logger.warning(f"🚨 INTRUSÃO DETECTADA: {obj['class']} está dentro da zona delimitada! "
+                                     f"(confiança: {obj['confidence']:.2f}, centro: {obj['center']})")
+                        zone_intrusion_found = True
+                        return True  # Retornar imediatamente quando encontrar intrusão na zona
+                    else:
+                        logger.debug(f"  - {obj['class']} NÃO está na zona (centro: {obj['center']})")
+                
+                # Se há zona configurada mas NENHUM objeto está na zona, NÃO acionar intrusão
+                if not zone_intrusion_found:
+                    logger.debug(f"  ℹ️ Objetos detectados mas NENHUM está dentro da zona delimitada - não acionando intrusão")
+                    # Se há zona configurada, não continuar com outras verificações (linha ou modo básico)
+                    # Retornar False para não acionar intrusão
+                    return False
             
-            # 4. Verificar intrusão nas áreas configuradas ou modo básico
-            if tracked_objects:
-                return self._check_advanced_intrusion(
-                    frame, tracked_objects, detection_line, detection_zone
-                )
-            # Se não há objetos rastreados mas houve movimento e existe zona configurada, considerar intrusão
-            if motion_detected and detection_zone:
-                return True
+            # 4. Rastreamento de objetos (para linha ou modo básico - apenas se NÃO há zona configurada)
+            # Se há zona configurada, já verificamos acima e retornamos
+            if not zone_config:
+                tracked_objects = self._track_objects(frame, camera_id, objects)
+                if tracked_objects:
+                    logger.debug(f"📊 {len(tracked_objects)} objeto(s) sendo rastreado(s) na câmera {camera_id}")
+                
+                # 5. Verificar intrusão com objetos rastreados (para linha ou modo básico)
+                if tracked_objects:
+                    intrusion = self._check_advanced_intrusion(
+                        frame, tracked_objects, detection_line, detection_zone
+                    )
+                    if intrusion:
+                        return True
+            
+            # 6. Se não há objetos YOLO mas houve movimento e existe zona, verificar movimento na zona
+            # IMPORTANTE: Só verificar movimento se não há objetos YOLO (para evitar duplicação)
+            if motion_detected and zone_config and not objects:
+                # Obter centro do movimento para verificar se está na zona
+                motion_center = self._get_motion_center(frame, bg_subtractor, kernel)
+                if motion_center:
+                    if self._check_zone_intrusion(motion_center, zone_config, frame.shape):
+                        logger.warning(f"🚨 INTRUSÃO DETECTADA na zona por movimento (câmera {camera_id}, centro: {motion_center})")
+                        return True
+                    else:
+                        logger.debug(f"Movimento detectado mas NÃO está na zona (centro: {motion_center}) - não acionando intrusão")
+                        # Se há zona configurada e movimento não está na zona, não acionar
+                        return False
+            
+            # 7. Se há zona configurada mas não detectamos nada na zona, retornar False
+            if zone_config:
+                logger.debug(f"  ℹ️ Zona configurada mas nenhuma intrusão detectada dentro dela")
+                return False
             
             return False
             
@@ -446,7 +561,7 @@ class DetectionService:
                                      f"(confiança: {obj['confidence']:.2f})")
                         return True
             
-            # Verificar entrada em zona
+            # Verificar entrada em zona (já verificado antes, mas manter para compatibilidade)
             if zone_config:
                 for obj in objects:
                     if self._check_zone_intrusion(obj['center'], zone_config, frame.shape):
@@ -503,33 +618,98 @@ class DetectionService:
             return False
 
     def _check_zone_intrusion(self, point: List[int], zone_config: Dict, frame_shape: Optional[Tuple[int,int,int]] = None) -> bool:
-        """Verificar se ponto está na zona"""
+        """Verificar se ponto está em alguma das zonas (suporta múltiplas zonas)"""
         try:
             px, py = point
-            points = zone_config.get('points', [])
-            # Ajustar escala se config tiver referência de largura/altura
-            ref_w = zone_config.get('ref_w')
-            ref_h = zone_config.get('ref_h')
-            if frame_shape is not None and ref_w and ref_h and ref_w > 0 and ref_h > 0:
-                h, w = frame_shape[0], frame_shape[1]
-                sx = w / float(ref_w)
-                sy = h / float(ref_h)
-                points = [{ 'x': p['x'] * sx, 'y': p['y'] * sy } for p in points]
             
-            if len(points) < 3:
+            # Suportar múltiplas zonas (novo formato) ou zona única (formato antigo)
+            zones_to_check = []
+            if 'zones' in zone_config and isinstance(zone_config['zones'], list):
+                # Novo formato: múltiplas zonas
+                zones_to_check = zone_config['zones']
+            elif 'points' in zone_config:
+                # Formato antigo: zona única (compatibilidade)
+                zones_to_check = [zone_config]
+            else:
+                logger.warning(f"Formato de zona inválido: {zone_config}")
                 return False
             
-            # Converter pontos para formato numpy
-            polygon_points = np.array([[p['x'], p['y']] for p in points], np.int32)
+            if not zones_to_check:
+                return False
             
-            # Verificar se ponto está dentro do polígono
-            inside = cv2.pointPolygonTest(polygon_points, (px, py), False)
+            ref_w = zone_config.get('ref_w')
+            ref_h = zone_config.get('ref_h')
             
-            return inside >= 0  # Dentro ou na borda
+            # Verificar se ponto está em alguma das zonas
+            for zone in zones_to_check:
+                points = zone.get('points', [])
+                
+                if len(points) < 3:
+                    continue  # Pular zonas inválidas
+                
+                # Ajustar escala se config tiver referência de largura/altura
+                if frame_shape is not None and ref_w and ref_h and ref_w > 0 and ref_h > 0:
+                    h, w = frame_shape[0], frame_shape[1]
+                    sx = w / float(ref_w)
+                    sy = h / float(ref_h)
+                    points = [{ 'x': p['x'] * sx, 'y': p['y'] * sy } for p in points]
+                
+                # Converter pontos para formato numpy
+                polygon_points = np.array([[p['x'], p['y']] for p in points], np.int32)
+                
+                # Verificar se ponto está dentro do polígono
+                inside = cv2.pointPolygonTest(polygon_points, (px, py), False)
+                
+                if inside >= 0:
+                    logger.info(f"✅ Ponto ({px}, {py}) está DENTRO da zona '{zone.get('name', 'zona')}' (distância: {inside:.1f})")
+                    return True  # Encontrou em uma zona, retornar True
+            
+            logger.debug(f"❌ Ponto ({px}, {py}) está FORA de todas as zonas")
+            return False
             
         except Exception as e:
-            logger.error(f"Erro na verificação de zona: {e}")
+            logger.error(f"Erro na verificação de zona: {e}", exc_info=True)
             return False
+    
+    def _get_motion_center(self, frame: np.ndarray, bg_subtractor, kernel) -> Optional[List[int]]:
+        """Obter centro do movimento detectado"""
+        try:
+            # Aplicar background subtraction
+            fg_mask = bg_subtractor.apply(frame)
+            
+            # Operações morfológicas para limpar ruído
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
+            
+            # Encontrar contornos
+            contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if not contours:
+                return None
+            
+            # Encontrar o maior contorno (movimento mais significativo)
+            largest_contour = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(largest_contour)
+            
+            # Verificar se área é significativa
+            h, w = frame.shape[:2]
+            min_area = max(800, int((w * h) * 0.0006))
+            if area < min_area:
+                return None
+            
+            # Calcular centro do contorno
+            M = cv2.moments(largest_contour)
+            if M["m00"] == 0:
+                return None
+            
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            
+            return [cx, cy]
+            
+        except Exception as e:
+            logger.error(f"Erro ao obter centro do movimento: {e}")
+            return None
 
     def _point_to_line_distance(self, px: int, py: int, x1: float, y1: float, x2: float, y2: float) -> float:
         """Calcular distância de ponto à linha"""
@@ -567,30 +747,49 @@ class DetectionService:
     def _handle_intrusion_advanced(self, db: Session, camera_id: int, frame: np.ndarray, timestamp: float):
         """Processar evento de intrusão avançado"""
         try:
+            # Obter informações da câmera para melhorar descrição
+            camera = db.query(Camera).filter(Camera.id == camera_id).first()
+            camera_name = camera.name if camera else f"Câmera {camera_id}"
+            
+            # Verificar se tem zona ou linha configurada
+            has_zone = camera and camera.detection_zone
+            has_line = camera and camera.detection_line
+            
+            # Criar descrição mais detalhada
+            if has_zone:
+                description = f"Intrusão detectada na zona delimitada - {camera_name}"
+            elif has_line:
+                description = f"Intrusão detectada - cruzamento de linha - {camera_name}"
+            else:
+                description = f"Intrusão detectada - {camera_name}"
+            
             # Garantir que diretório existe
             screenshot_dir = os.path.join(settings.upload_dir, "screenshots")
             os.makedirs(screenshot_dir, exist_ok=True)
             
-            # Salvar screenshot
+            # Salvar screenshot com qualidade melhor
             timestamp_str = datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S_%f')[:-3]
             filename = f"intrusion_{camera_id}_{timestamp_str}.jpg"
             filepath = os.path.join(screenshot_dir, filename)
             # URL pública para o frontend (sempre com barras)
             public_url = f"/uploads/screenshots/{filename}"
             
-            success = cv2.imwrite(filepath, frame)
+            # Salvar com qualidade JPEG 95
+            success = cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
             if not success:
                 logger.error(f"Falha ao salvar screenshot: {filepath}")
                 filepath = None
                 public_url = None
+            else:
+                logger.info(f"Screenshot salvo com sucesso: {filepath}")
             
             # Criar evento com EventType correto
             event = Event(
                 camera_id=camera_id,
                 event_type=EventType.INTRUSION.value,
                 confidence=0.9,  # Alta confiança para detecção avançada
-                description="Intrusão detectada - Sistema avançado de detecção",
-                image_path=public_url or filepath,
+                description=description,
+                image_path=public_url if public_url else None,
                 timestamp=datetime.fromtimestamp(timestamp),
                 is_processed=True,
                 is_notified=False
@@ -600,8 +799,9 @@ class DetectionService:
             db.commit()
             db.refresh(event)
             
-            logger.info(f"Evento de intrusão registrado: ID={event.id}, Câmera={camera_id}, "
-                          f"Timestamp={timestamp_str}, Imagem={'OK' if filepath else 'FALHOU'}")
+            logger.info(f"✅ Evento de intrusão registrado: ID={event.id}, Câmera={camera_id}, "
+                          f"Timestamp={timestamp_str}, Imagem={'OK' if filepath else 'FALHOU'}, "
+                          f"URL={public_url}")
             
             # Enviar notificação WebSocket de forma síncrona
             try:
@@ -634,7 +834,8 @@ class DetectionService:
             
         except Exception as e:
             logger.error(f"Erro ao processar intrusão (câmera {camera_id}): {e}", exc_info=True)
-            db.rollback()
+            if db:
+                db.rollback()
 
     # Métodos públicos para acesso da API
     def test_detection(self, frame: np.ndarray, sensitivity: float) -> List[Dict]:

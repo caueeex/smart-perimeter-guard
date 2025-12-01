@@ -12,9 +12,17 @@ interface LiveStreamProps {
   className?: string;
   onConfigure?: () => void;
   detectionEnabled?: boolean;
+  onVideoLoad?: (video: HTMLVideoElement | null) => void;
+  detectionZone?: { 
+    points?: Array<{x: number; y: number}>; 
+    zones?: Array<{id: string; points: Array<{x: number; y: number}>; name?: string}>;
+    ref_w?: number; 
+    ref_h?: number 
+  } | null;
+  showZonePreview?: boolean;
 }
 
-const LiveStream = ({ streamUrl, cameraName, cameraId, className = '', onConfigure, detectionEnabled = false }: LiveStreamProps) => {
+const LiveStream = ({ streamUrl, cameraName, cameraId, className = '', onConfigure, detectionEnabled = false, onVideoLoad, detectionZone, showZonePreview = false }: LiveStreamProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -27,6 +35,14 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '', onConfigu
   const [frameInterval, setFrameInterval] = useState<NodeJS.Timeout | null>(null);
 
   const initGuardRef = useRef<string | null>(null);
+
+  // Notificar quando vídeo carregar
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && video.readyState >= 2 && onVideoLoad) {
+      onVideoLoad(video);
+    }
+  }, [onVideoLoad, isPlaying]);
 
   useEffect(() => {
     const initializeStream = async () => {
@@ -87,6 +103,11 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '', onConfigu
           
           setStream(mediaStream);
           video.srcObject = mediaStream;
+          video.onloadedmetadata = () => {
+            if (onVideoLoad) {
+              onVideoLoad(video);
+            }
+          };
           setIsLoading(false);
           setIsPlaying(true);
         } else if (cameraId && !streamUrl.startsWith('webcam://')) {
@@ -327,6 +348,52 @@ const LiveStream = ({ streamUrl, cameraName, cameraId, className = '', onConfigu
         <div className="absolute top-4 right-4">
           <div className={`w-3 h-3 rounded-full ${isPlaying ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
         </div>
+
+        {/* Zone Preview Overlay */}
+        {showZonePreview && detectionZone && (() => {
+          // Suportar múltiplas zonas ou zona única
+          const zones = detectionZone.zones || (detectionZone.points ? [{
+            id: 'zone-1',
+            points: detectionZone.points
+          }] : []);
+          
+          if (zones.length === 0) return null;
+          
+          const container = videoRef.current?.parentElement;
+          const ref_w = detectionZone.ref_w;
+          const ref_h = detectionZone.ref_h;
+          
+          return (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }}>
+              {zones.map((zone, idx) => {
+                if (!zone.points || zone.points.length < 3) return null;
+                
+                let points = zone.points;
+                if (ref_w && ref_h && container) {
+                  const containerW = container.clientWidth;
+                  const containerH = container.clientHeight;
+                  const scaleX = containerW / ref_w;
+                  const scaleY = containerH / ref_h;
+                  points = zone.points.map(p => ({
+                    x: p.x * scaleX,
+                    y: p.y * scaleY
+                  }));
+                }
+                
+                return (
+                  <polygon
+                    key={zone.id || `zone-${idx}`}
+                    points={points.map(p => `${p.x},${p.y}`).join(' ')}
+                    fill="rgba(239,68,68,0.1)"
+                    stroke="#ef4444"
+                    strokeWidth={1.5}
+                    strokeDasharray="4,4"
+                  />
+                );
+              })}
+            </svg>
+          );
+        })()}
       </div>
     </Card>
   );

@@ -57,8 +57,18 @@ const TestArea = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const detectionModelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+  // Refs para desenho de área (estrutura similar ao Cameras.tsx)
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const videoContainerRef = useRef<HTMLDivElement | null>(null);
+  
+  // Estados para desenho de área
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
+  const [draggedPointIndex, setDraggedPointIndex] = useState<number | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
+  const [videoContainerRect, setVideoContainerRect] = useState<{left: number; top: number; width: number; height: number} | null>(null);
+  const [videoDimensions, setVideoDimensions] = useState<{width: number; height: number} | null>(null);
+  
   const [testAreas, setTestAreas] = useState<TestArea[]>([]);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [areaName, setAreaName] = useState("");
@@ -272,9 +282,12 @@ const TestArea = () => {
         
         console.log("Objetos relevantes encontrados:", relevantObjects.length);
 
-        // Converter para formato compatível e ESCALAR para o canvas
-        const scaleX = video.videoWidth > 0 ? (canvasRef.current!.width / video.videoWidth) : 1;
-        const scaleY = video.videoHeight > 0 ? (canvasRef.current!.height / video.videoHeight) : 1;
+        // Converter para formato compatível e ESCALAR para o canvas/overlay
+        // Usar videoContainerRect se disponível, senão usar dimensões do canvas
+        const containerWidth = videoContainerRect?.width || canvasRef.current!.width;
+        const containerHeight = videoContainerRect?.height || canvasRef.current!.height;
+        const scaleX = video.videoWidth > 0 ? (containerWidth / video.videoWidth) : 1;
+        const scaleY = video.videoHeight > 0 ? (containerHeight / video.videoHeight) : 1;
         const detectedObjects = relevantObjects.map(pred => {
           const [bx, by, bw, bh] = pred.bbox as [number, number, number, number];
           const x1 = bx * scaleX;
@@ -293,61 +306,90 @@ const TestArea = () => {
 
         const intrusions: any[] = [];
         
-        // Verificar intrusões em cada área ativa (≥10% da bbox dentro)
+        // Verificar intrusões em cada área ativa
+        // IMPORTANTE: Verificar se o CENTRO do objeto está dentro da zona (igual ao backend)
         testAreas.forEach(area => {
           if (!area.isActive) return;
           
           detectedObjects.forEach(obj => {
-            const ratio = bboxInsideRatio(obj.bbox, area.points);
-            if (ratio >= 0.1) {
-              console.log("INTRUSÃO DETECTADA!", { area: area.name, object: obj.class });
-              
-              intrusions.push({
-                object: obj,
-                area: area.name,
-                timestamp: new Date()
-              });
-              
-              // Adicionar alerta
-              const alert = {
-                id: Date.now().toString(),
-                message: `🚨 INTRUSÃO DETECTADA! ${obj.class} invadiu a área "${area.name}"`,
-                type: 'intrusion' as const,
-                timestamp: new Date()
-              };
-              
-              setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Manter apenas 10 alertas
-              
-              // Atualizar contador de intrusões
-              setTestAreas(prev => prev.map(a => 
-                a.id === area.id 
-                  ? { ...a, intrusionCount: a.intrusionCount + 1, lastIntrusion: new Date() }
-                  : a
-              ));
+            // Verificar se o centro do objeto está dentro da zona (igual ao backend)
+            // O backend usa cv2.pointPolygonTest que verifica se o ponto está dentro
+            const centerInside = isPointInPolygon(obj.center, area.points);
+            
+            // Debug: verificar coordenadas
+            console.log(`🔍 Verificando objeto ${obj.class}:`, {
+              center: obj.center,
+              bbox: obj.bbox,
+              areaName: area.name,
+              areaPoints: area.points,
+              centerInside,
+              videoContainerRect,
+              videoDimensions
+            });
+            
+            if (!centerInside) {
+              // Se o centro não está dentro, não acionar intrusão
+              console.log(`❌ Objeto ${obj.class} NÃO está na zona "${area.name}" (centro: [${Math.round(obj.center[0])}, ${Math.round(obj.center[1])}])`);
+              return; // Pular este objeto
+            }
+            
+            // Se chegou aqui, o centro está dentro da zona - acionar intrusão
+            console.log("✅ INTRUSÃO DETECTADA!", { 
+              area: area.name, 
+              object: obj.class,
+              center: obj.center,
+              bbox: obj.bbox,
+              confidence: obj.confidence
+            });
+            
+            intrusions.push({
+              object: obj,
+              area: area.name,
+              timestamp: new Date()
+            });
+            
+            // Adicionar alerta
+            const alert = {
+              id: Date.now().toString(),
+              message: `🚨 INTRUSÃO DETECTADA! ${obj.class} invadiu a área "${area.name}"`,
+              type: 'intrusion' as const,
+              timestamp: new Date()
+            };
+            
+            setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Manter apenas 10 alertas
+            
+            // Atualizar contador de intrusões
+            setTestAreas(prev => prev.map(a => 
+              a.id === area.id 
+                ? { ...a, intrusionCount: a.intrusionCount + 1, lastIntrusion: new Date() }
+                : a
+            ));
 
-              // Capturar screenshot
-              captureScreenshot(area.name, obj.class);
+            // Capturar screenshot
+            captureScreenshot(area.name, obj.class);
 
-                    // Registrar evento no backend (com throttle de 3s para evitar spam)
-                    const nowTs = Date.now();
-                    if (nowTs - lastEventAtRef.current > 3000) {
-                      lastEventAtRef.current = nowTs;
-                      (async () => {
-                        try {
-                          const cameraIdNum = parseInt(selectedCamera || '0', 10);
-                          await eventService.createEvent({
-                            camera_id: isNaN(cameraIdNum) ? undefined : cameraIdNum,
-                            event_type: 'intrusion',
-                            description: `Intrusão detectada na área "${area.name}" (${obj.class})`,
-                            confidence: obj.confidence,
-                            detected_objects: [{ class: obj.class, confidence: obj.confidence, center: obj.center }],
-                            bounding_boxes: [obj.bbox]
-                          });
-                        } catch (e) {
-                          console.warn('Falha ao registrar evento no backend:', e);
-                        }
-                      })();
-                    }
+            // Registrar evento no backend (com throttle de 3s para evitar spam)
+            const nowTs = Date.now();
+            if (nowTs - lastEventAtRef.current > 3000) {
+              lastEventAtRef.current = nowTs;
+              (async () => {
+                try {
+                  const cameraIdNum = parseInt(selectedCamera || '0', 10);
+                  // Só criar evento se camera_id for válido
+                  if (!isNaN(cameraIdNum) && cameraIdNum > 0) {
+                    await eventService.createEvent({
+                      camera_id: cameraIdNum,
+                      event_type: 'intrusion',
+                      description: `Intrusão detectada na área "${area.name}" (${obj.class})`,
+                      confidence: obj.confidence,
+                      detected_objects: [{ class: obj.class, confidence: obj.confidence, center: obj.center }],
+                      bounding_boxes: [obj.bbox]
+                    });
+                  }
+                } catch (e) {
+                  console.warn('Falha ao registrar evento no backend:', e);
+                }
+              })();
             }
           });
         });
@@ -368,18 +410,50 @@ const TestArea = () => {
       rafId = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(rafId);
-  }, [isMonitoring, testAreas]);
+  }, [isMonitoring, testAreas, videoContainerRect]);
 
-  // Função para verificar se um ponto está dentro de um polígono
+  // Função para calcular área de um polígono (Shoelace formula) - igual ao Cameras.tsx
+  const calculatePolygonArea = (points: Array<{x: number; y: number}>): number => {
+    if (points.length < 3) return 0;
+    let area = 0;
+    for (let i = 0; i < points.length; i++) {
+      const j = (i + 1) % points.length;
+      area += points[i].x * points[j].y;
+      area -= points[j].x * points[i].y;
+    }
+    return Math.abs(area) / 2;
+  };
+
+  // Validação de área mínima (mínimo 1000 pixels²) - igual ao Cameras.tsx
+  const MIN_AREA = 1000;
+  const validateZoneArea = (points: Array<{x: number; y: number}>): { valid: boolean; area: number; message: string } => {
+    const area = calculatePolygonArea(points);
+    if (points.length < 3) {
+      return { valid: false, area: 0, message: 'Mínimo 3 pontos necessários' };
+    }
+    if (area < MIN_AREA) {
+      return { valid: false, area, message: `Área muito pequena (${Math.round(area)}px²). Mínimo: ${MIN_AREA}px²` };
+    }
+    return { valid: true, area, message: `Área válida: ${Math.round(area)}px²` };
+  };
+
+  // Função para verificar se um ponto está dentro de um polígono (Ray Casting Algorithm)
   const isPointInPolygon = (point: [number, number], polygon: Point[]): boolean => {
+    if (polygon.length < 3) return false;
+    
     const [x, y] = point;
     let inside = false;
     
+    // Ray casting algorithm - verifica quantas vezes uma linha horizontal do ponto cruza o polígono
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const [xi, yi] = [polygon[i].x, polygon[i].y];
-      const [xj, yj] = [polygon[j].x, polygon[j].y];
+      const xi = polygon[i].x;
+      const yi = polygon[i].y;
+      const xj = polygon[j].x;
+      const yj = polygon[j].y;
       
-      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+      // Verificar se o ponto está na interseção da linha horizontal com a aresta do polígono
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) {
         inside = !inside;
       }
     }
@@ -408,31 +482,107 @@ const TestArea = () => {
     return total > 0 ? countInside / total : 0;
   };
 
-  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!canvasRef.current) return;
+  // Atualizar dimensões do container do vídeo quando o vídeo carregar
+  useEffect(() => {
+    if (videoRef.current && overlayRef.current) {
+      const updateContainerRect = () => {
+        const container = videoContainerRef.current || overlayRef.current;
+        if (container) {
+          const containerRect = container.getBoundingClientRect();
+          const overlayRect = overlayRef.current?.getBoundingClientRect();
+          
+          if (overlayRect) {
+            setVideoContainerRect({
+              left: containerRect.left - overlayRect.left,
+              top: containerRect.top - overlayRect.top,
+              width: containerRect.width,
+              height: containerRect.height
+            });
+          }
+        }
+      };
+      
+      const video = videoRef.current;
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setVideoDimensions({ width: video.videoWidth, height: video.videoHeight });
+        updateContainerRect();
+      }
+      
+      video.addEventListener('loadedmetadata', updateContainerRect);
+      window.addEventListener('resize', updateContainerRect);
+      
+      return () => {
+        video.removeEventListener('loadedmetadata', updateContainerRect);
+        window.removeEventListener('resize', updateContainerRect);
+      };
+    }
+  }, [videoRef.current, isMonitoring]);
+
+  // Handler de clique no overlay (estrutura similar ao Cameras.tsx)
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
     
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    if (draggedPointIndex !== null) {
+      return;
+    }
     
-    const newPoint = { x, y };
-    setCurrentPoints(prev => [...prev, newPoint]);
+    if (!isDrawing && currentPoints.length === 0) {
+      setIsDrawing(true);
+    }
+    
+    // Usar videoContainerRef se disponível, senão usar canvas
+    const container = videoContainerRef.current || canvasRef.current;
+    if (!container) {
+      console.error('❌ Container não encontrado');
+      return;
+    }
+    
+    const containerRect = container.getBoundingClientRect();
+    const overlayRect = overlayRef.current?.getBoundingClientRect();
+    
+    if (!overlayRect) {
+      console.error('❌ Overlay rect não encontrado');
+      return;
+    }
+    
+    // Atualizar estado com dimensões do container
+    const videoRect = {
+      left: containerRect.left - overlayRect.left,
+      top: containerRect.top - overlayRect.top,
+      width: containerRect.width,
+      height: containerRect.height
+    };
+    setVideoContainerRect(videoRect);
+    
+    // Calcular coordenadas relativas ao container
+    const x = e.clientX - containerRect.left;
+    const y = e.clientY - containerRect.top;
+    
+    // Garantir que as coordenadas estão dentro dos limites
+    const boundedX = Math.max(0, Math.min(containerRect.width, x));
+    const boundedY = Math.max(0, Math.min(containerRect.height, y));
+    
+    setCurrentPoints(prev => [...prev, { x: boundedX, y: boundedY }]);
   };
 
-  const handleCanvasMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !canvasRef.current) return;
+  // Handler de movimento do mouse no overlay (para drag)
+  const handleOverlayMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (draggedPointIndex === null || !overlayRef.current) return;
     
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const container = videoContainerRef.current || canvasRef.current;
+    if (!container) return;
     
-    // Atualizar o último ponto enquanto desenha
-    if (currentPoints.length > 0) {
-      const newPoints = [...currentPoints.slice(0, -1), { x, y }];
-      setCurrentPoints(newPoints);
-    }
+    const containerRect = container.getBoundingClientRect();
+    
+    // Calcular coordenadas relativas ao container
+    const x = Math.max(0, Math.min(containerRect.width, e.clientX - containerRect.left));
+    const y = Math.max(0, Math.min(containerRect.height, e.clientY - containerRect.top));
+    
+    // Atualizar ponto arrastado
+    const updatedPoints = [...currentPoints];
+    updatedPoints[draggedPointIndex] = { x, y };
+    setCurrentPoints(updatedPoints);
   };
 
   const startDrawing = () => {
@@ -443,6 +593,13 @@ const TestArea = () => {
   const finishDrawing = () => {
     if (currentPoints.length < 3) {
       toast.error("Desenhe pelo menos 3 pontos para formar uma área!");
+      return;
+    }
+    
+    // Validar área mínima
+    const validation = validateZoneArea(currentPoints);
+    if (!validation.valid) {
+      toast.error(validation.message);
       return;
     }
     
@@ -466,12 +623,19 @@ const TestArea = () => {
     setAreaName("");
     setCurrentPoints([]);
     setShowNameInput(false);
-    toast.success(`Área "${newArea.name}" criada com sucesso!`);
+    toast.success(`Área "${newArea.name}" criada com sucesso! (${Math.round(validation.area)}px²)`);
   };
 
   const confirmAreaName = () => {
     if (!areaName.trim()) {
       toast.error("Digite um nome para a área!");
+      return;
+    }
+    
+    // Validar área mínima
+    const validation = validateZoneArea(currentPoints);
+    if (!validation.valid) {
+      toast.error(validation.message);
       return;
     }
     
@@ -487,7 +651,7 @@ const TestArea = () => {
     setAreaName("");
     setCurrentPoints([]);
     setShowNameInput(false);
-    toast.success(`Área "${newArea.name}" criada com sucesso!`);
+    toast.success(`Área "${newArea.name}" criada com sucesso! (${Math.round(validation.area)}px²)`);
   };
 
   const cancelAreaName = () => {
@@ -803,59 +967,8 @@ const TestArea = () => {
         }
       }
       
-      // Desenhar áreas existentes
-      testAreas.forEach(area => {
-        if (area.points.length < 2) return;
-        
-        ctx.beginPath();
-        ctx.moveTo(area.points[0].x, area.points[0].y);
-        
-        for (let i = 1; i < area.points.length; i++) {
-          ctx.lineTo(area.points[i].x, area.points[i].y);
-        }
-        
-        ctx.closePath();
-        ctx.strokeStyle = area.isActive ? '#ef4444' : '#6b7280';
-        ctx.fillStyle = area.isActive ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.1)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fill();
-        
-        // Desenhar nome da área
-        if (area.points.length > 0) {
-          const centerX = area.points.reduce((sum, p) => sum + p.x, 0) / area.points.length;
-          const centerY = area.points.reduce((sum, p) => sum + p.y, 0) / area.points.length;
-          
-          ctx.fillStyle = area.isActive ? '#ef4444' : '#6b7280';
-          ctx.font = '14px Arial';
-          ctx.textAlign = 'center';
-          ctx.fillText(area.name, centerX, centerY);
-        }
-      });
-      
-      // Desenhar área sendo criada
-      if (currentPoints.length > 0) {
-        ctx.beginPath();
-        ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
-        
-        for (let i = 1; i < currentPoints.length; i++) {
-          ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
-        }
-        
-        ctx.strokeStyle = '#3b82f6';
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.fill();
-        
-        // Desenhar pontos
-        currentPoints.forEach(point => {
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
-          ctx.fillStyle = '#3b82f6';
-          ctx.fill();
-        });
-      }
+      // Áreas e pontos são renderizados pelo SVG overlay, não pelo canvas
+      // O canvas apenas renderiza o vídeo e objetos detectados
       
       // Desenhar objetos detectados
       if (detectionResults) {
@@ -1076,87 +1189,283 @@ const TestArea = () => {
                 </div>
               </div>
               
-              <div className="relative w-full flex justify-center items-center">
-                {/* Video da câmera */}
-                <video
-                  ref={videoRef}
-                  width={800}
-                  height={600}
-                  className="hidden"
-                  autoPlay
-                  muted
-                  playsInline
-                />
-                
-                {/* Canvas sobreposto para desenho e detecção */}
-                <canvas
-                  ref={canvasRef}
-                  width={800}
-                  height={600}
-                  className="border border-border rounded-lg cursor-crosshair w-full max-w-full h-auto relative"
-                  style={{ maxWidth: '800px', maxHeight: '600px' }}
-                  onClick={handleCanvasClick}
-                  onMouseMove={handleCanvasMouseMove}
-                />
-                
-                {/* Controles de Desenho */}
-                <div className="absolute top-4 left-4 z-10 flex gap-2">
-                  {!isDrawing ? (
-                    <Button onClick={startDrawing} size="sm" variant="outline">
-                      <MapPin className="w-4 h-4 mr-2" />
-                      Desenhar Área
-                    </Button>
-                  ) : (
-                    <>
-                      <Button onClick={finishDrawing} size="sm" className="bg-green-600 hover:bg-green-700">
-                        <CheckCircle className="w-4 h-4 mr-2" />
-                        Finalizar
-                      </Button>
-                      <Button onClick={clearCurrentDrawing} size="sm" variant="outline">
-                        <XCircle className="w-4 h-4 mr-2" />
-                        Cancelar
-                      </Button>
-                    </>
-                  )}
-                </div>
-                
-                {/* Input para nome da área */}
-                {showNameInput && (
-                  <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-lg border border-border">
-                    <div className="space-y-3">
-                      <div>
-                        <Label htmlFor="areaName" className="text-sm font-medium">
-                          Nome da Área:
-                        </Label>
-                        <Input
-                          id="areaName"
-                          value={areaName}
-                          onChange={(e) => setAreaName(e.target.value)}
-                          placeholder="Ex: Área de Entrada"
-                          className="mt-1"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              confirmAreaName();
-                            } else if (e.key === 'Escape') {
-                              cancelAreaName();
+              <div className="relative w-full select-none" style={{ position: 'relative' }}>
+                {/* Container que envolve o vídeo/canvas */}
+                <div className="relative w-full" ref={videoContainerRef} style={{ position: 'relative' }}>
+                  {/* Video da câmera */}
+                  <video
+                    ref={videoRef}
+                    width={800}
+                    height={600}
+                    className="hidden"
+                    autoPlay
+                    muted
+                    playsInline
+                    onLoadedMetadata={() => {
+                      if (videoRef.current) {
+                        const width = videoRef.current.videoWidth || 800;
+                        const height = videoRef.current.videoHeight || 600;
+                        setVideoDimensions({ width, height });
+                        
+                        // Atualizar container rect após vídeo carregar
+                        setTimeout(() => {
+                          if (videoContainerRef.current && overlayRef.current) {
+                            const containerRect = videoContainerRef.current.getBoundingClientRect();
+                            const overlayRect = overlayRef.current.getBoundingClientRect();
+                            if (overlayRect) {
+                              setVideoContainerRect({
+                                left: containerRect.left - overlayRect.left,
+                                top: containerRect.top - overlayRect.top,
+                                width: containerRect.width,
+                                height: containerRect.height
+                              });
                             }
-                          }}
+                          }
+                        }, 100);
+                      }
+                    }}
+                  />
+                  
+                  {/* Canvas para renderizar vídeo e objetos detectados */}
+                  <canvas
+                    ref={canvasRef}
+                    width={800}
+                    height={600}
+                    className="border border-border rounded-lg w-full max-w-full h-auto relative pointer-events-none"
+                    style={{ maxWidth: '800px', maxHeight: '600px' }}
+                  />
+                  
+                  {/* Overlay de desenho - posicionado sobre o canvas (estrutura similar ao Cameras.tsx) */}
+                  <div
+                    ref={overlayRef}
+                    className="absolute inset-0 cursor-crosshair"
+                    style={{ 
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      zIndex: 999,
+                      pointerEvents: 'auto',
+                      backgroundColor: 'transparent'
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      // Não capturar cliques em botões ou inputs
+                      const target = e.target as HTMLElement;
+                      if (target.closest('button') || target.closest('input') || target.closest('[role="button"]')) {
+                        return;
+                      }
+                      handleOverlayClick(e);
+                    }}
+                    onMouseMove={handleOverlayMouseMove}
+                    onMouseUp={() => {
+                      setDraggedPointIndex(null);
+                    }}
+                    onMouseLeave={() => {
+                      setDraggedPointIndex(null);
+                    }}
+                  >
+                    {/* SVG para renderizar áreas e pontos (estrutura similar ao Cameras.tsx) */}
+                    <svg 
+                      className="absolute pointer-events-none" 
+                      style={{ 
+                        position: 'absolute',
+                        left: videoContainerRect ? `${videoContainerRect.left}px` : '0px',
+                        top: videoContainerRect ? `${videoContainerRect.top}px` : '0px',
+                        width: videoContainerRect ? `${videoContainerRect.width}px` : '100%',
+                        height: videoContainerRect ? `${videoContainerRect.height}px` : '100%',
+                        zIndex: 10,
+                        pointerEvents: 'none'
+                      }}
+                      viewBox={videoContainerRect ? `0 0 ${videoContainerRect.width} ${videoContainerRect.height}` : undefined}
+                      preserveAspectRatio="none"
+                    >
+                      {/* Renderizar área sendo criada */}
+                      {currentPoints.length >= 3 && (
+                        <polygon
+                          points={currentPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                          fill="rgba(239,68,68,0.15)"
+                          stroke="#ef4444"
+                          strokeWidth={2}
                         />
+                      )}
+                      {currentPoints.length > 1 && currentPoints.length < 3 && (
+                        <polyline
+                          points={currentPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                          fill="none"
+                          stroke="#ef4444"
+                          strokeWidth={2}
+                          strokeDasharray="5,5"
+                        />
+                      )}
+                      {/* Renderizar pontos com drag and drop */}
+                      {currentPoints.map((point, pointIdx) => {
+                        const isHovered = hoveredPoint === pointIdx;
+                        const isDragging = draggedPointIndex === pointIdx;
+                        return (
+                          <g
+                            key={pointIdx}
+                            style={{ pointerEvents: 'all', cursor: 'move' }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setDraggedPointIndex(pointIdx);
+                            }}
+                            onMouseEnter={() => setHoveredPoint(pointIdx)}
+                            onMouseLeave={() => setHoveredPoint(null)}
+                          >
+                            <circle
+                              cx={point.x}
+                              cy={point.y}
+                              r={isDragging || isHovered ? 8 : 6}
+                              fill={isDragging ? "#ff6b6b" : "#ef4444"}
+                              stroke="#fff"
+                              strokeWidth={2}
+                            />
+                            <text
+                              x={point.x}
+                              y={point.y - 12}
+                              textAnchor="middle"
+                              fill="#fff"
+                              fontSize="10"
+                              fontWeight="bold"
+                              style={{ pointerEvents: 'none' }}
+                            >
+                              {pointIdx + 1}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      
+                      {/* Renderizar áreas já criadas */}
+                      {testAreas.map(area => {
+                        if (area.points.length < 3) return null;
+                        
+                        // Calcular centro da área para posicionar o nome
+                        const centerX = area.points.reduce((sum, p) => sum + p.x, 0) / area.points.length;
+                        const centerY = area.points.reduce((sum, p) => sum + p.y, 0) / area.points.length;
+                        
+                        return (
+                          <g key={area.id}>
+                            <polygon
+                              points={area.points.map(p => `${p.x},${p.y}`).join(' ')}
+                              fill={area.isActive ? "rgba(239,68,68,0.1)" : "rgba(107,114,128,0.05)"}
+                              stroke={area.isActive ? "#ef4444" : "#6b7280"}
+                              strokeWidth={area.isActive ? 2 : 1}
+                              strokeDasharray={area.isActive ? "none" : "5,5"}
+                            />
+                            {/* Nome da área */}
+                            <text
+                              x={centerX}
+                              y={centerY}
+                              textAnchor="middle"
+                              fill={area.isActive ? "#ef4444" : "#6b7280"}
+                              fontSize="14"
+                              fontWeight="bold"
+                              style={{ pointerEvents: 'none' }}
+                            >
+                              {area.name}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    
+                    {/* Mensagem de instrução */}
+                    {!isDrawing && currentPoints.length === 0 && (
+                      <div 
+                        className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground bg-black/20 rounded-md pointer-events-none"
+                        style={{ zIndex: 5 }}
+                      >
+                        Clique para marcar os pontos da área (mínimo 3 pontos)
                       </div>
-                      <div className="flex gap-2">
-                        <Button onClick={confirmAreaName} size="sm" className="bg-green-600 hover:bg-green-700">
+                    )}
+                  </div>
+                  
+                  {/* Controles de Desenho */}
+                  <div className="absolute top-4 left-4 flex gap-2" style={{ zIndex: 10000, pointerEvents: 'auto' }}>
+                    {!isDrawing ? (
+                      <Button onClick={startDrawing} size="sm" variant="outline">
+                        <MapPin className="w-4 h-4 mr-2" />
+                        Desenhar Área
+                      </Button>
+                    ) : (
+                      <>
+                        <Button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            finishDrawing();
+                          }} 
+                          size="sm" 
+                          className="bg-green-600 hover:bg-green-700"
+                        >
                           <CheckCircle className="w-4 h-4 mr-2" />
-                          Confirmar
+                          Finalizar
                         </Button>
-                        <Button onClick={cancelAreaName} size="sm" variant="outline">
+                        <Button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearCurrentDrawing();
+                          }} 
+                          size="sm" 
+                          variant="outline"
+                        >
                           <XCircle className="w-4 h-4 mr-2" />
                           Cancelar
                         </Button>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Input para nome da área */}
+                  {showNameInput && (
+                    <div className="absolute top-16 left-4 bg-card p-4 rounded-lg shadow-lg border border-border" style={{ zIndex: 10000, pointerEvents: 'auto' }}>
+                      <div className="space-y-3">
+                        <div>
+                          <Label htmlFor="areaName" className="text-sm font-medium">
+                            Nome da Área:
+                          </Label>
+                          <Input
+                            id="areaName"
+                            value={areaName}
+                            onChange={(e) => setAreaName(e.target.value)}
+                            placeholder="Ex: Área de Entrada"
+                            className="mt-1"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                confirmAreaName();
+                              } else if (e.key === 'Escape') {
+                                cancelAreaName();
+                              }
+                            }}
+                          />
+                        </div>
+                        {currentPoints.length >= 3 && (
+                          <div className="text-xs">
+                            <Badge variant={validateZoneArea(currentPoints).valid ? "default" : "destructive"}>
+                              {validateZoneArea(currentPoints).valid 
+                                ? `✓ ${Math.round(validateZoneArea(currentPoints).area)}px²` 
+                                : validateZoneArea(currentPoints).message}
+                            </Badge>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button onClick={confirmAreaName} size="sm" className="bg-green-600 hover:bg-green-700">
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Confirmar
+                          </Button>
+                          <Button onClick={cancelAreaName} size="sm" variant="outline">
+                            <XCircle className="w-4 h-4 mr-2" />
+                            Cancelar
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </Card>
           </div>
@@ -1198,9 +1507,10 @@ const TestArea = () => {
                         </div>
                       </div>
                       
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-sm text-muted-foreground space-y-1">
                         <p>Pontos: {area.points.length}</p>
-                        <p>Intrusões: {area.intrusionCount}</p>
+                        <p>Área: {Math.round(calculatePolygonArea(area.points))}px²</p>
+                        <p>Intrusões: <span className="font-semibold text-red-600">{area.intrusionCount}</span></p>
                         {area.lastIntrusion && (
                           <p>Última: {area.lastIntrusion.toLocaleTimeString()}</p>
                         )}

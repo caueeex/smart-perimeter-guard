@@ -9,7 +9,7 @@ from models.event import EventType
 
 class EventBase(BaseModel):
     """Schema base de evento"""
-    camera_id: int
+    camera_id: Optional[int] = None  # Tornar opcional para permitir eventos sem câmera específica
     event_type: EventType
     description: Optional[str] = None
     confidence: Optional[float] = None

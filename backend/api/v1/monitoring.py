@@ -86,23 +86,26 @@ def get_camera_detection_status(
                 detail="Câmera não encontrada"
             )
         
-        # Verificar se está sendo monitorada
-        is_monitored = camera_id in detection_service.active_monitors
+        # Verificar se monitoramento está realmente ativo
+        monitoring_active = detection_service.is_monitoring_active(camera_id)
+        thread_alive = camera_id in detection_service.camera_threads and detection_service.camera_threads[camera_id].is_alive()
         
         # Últimos eventos da câmera
         recent_events = db.query(Event).filter(
             Event.camera_id == camera_id
         ).order_by(Event.timestamp.desc()).limit(5).all()
         
-        # Status da câmera
-        camera_status = {
+        return {
             "camera_id": camera_id,
-            "name": camera.name,
+            "camera_name": camera.name,
             "detection_enabled": camera.detection_enabled,
-            "is_monitored": is_monitored,
+            "monitoring_active": monitoring_active,
+            "thread_alive": thread_alive,
+            "has_zone": camera.detection_zone is not None,
+            "has_line": camera.detection_line is not None,
             "sensitivity": camera.sensitivity,
-            "has_detection_line": camera.detection_line is not None,
-            "has_detection_zone": camera.detection_zone is not None,
+            "stream_url": camera.stream_url,
+            "status": "active" if (monitoring_active and thread_alive) else "inactive",
             "recent_events": [
                 {
                     "id": event.id,
@@ -115,8 +118,6 @@ def get_camera_detection_status(
             ],
             "last_update": datetime.now().isoformat()
         }
-        
-        return camera_status
         
     except HTTPException:
         raise

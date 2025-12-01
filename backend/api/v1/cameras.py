@@ -107,15 +107,25 @@ def configure_detection_zone(
     current_user: User = Depends(AuthService.get_current_admin_user)
 ):
     """Configurar zona de detecção"""
-    camera = CameraService.configure_detection_zone(
-        db, camera_id, detection_zone.dict()
-    )
-    if not camera:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Câmera não encontrada"
+    try:
+        camera = CameraService.configure_detection_zone(
+            db, camera_id, detection_zone.dict()
         )
-    return {"message": "Zona de detecção configurada com sucesso"}
+        if not camera:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Câmera não encontrada"
+            )
+        return {"message": "Zona de detecção configurada com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao configurar zona de detecção: {str(e)}. Detalhes: {error_details}"
+        )
 
 
 @router.get("/stats/summary")

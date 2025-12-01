@@ -19,8 +19,18 @@ class EventService:
     @staticmethod
     def create_event(db: Session, event: EventCreate) -> Event:
         """Criar novo evento"""
+        # Validar camera_id se fornecido
+        if event.camera_id is not None:
+            from models.camera import Camera
+            camera = db.query(Camera).filter(Camera.id == event.camera_id).first()
+            if not camera:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Câmera {event.camera_id} não encontrada"
+                )
+        
         db_event = Event(
-            camera_id=event.camera_id,
+            camera_id=event.camera_id,  # Pode ser None
             event_type=event.event_type,
             description=event.description,
             confidence=event.confidence,

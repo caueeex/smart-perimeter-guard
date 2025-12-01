@@ -82,4 +82,11 @@ class DetectionZoneConfig(BaseModel):
     ref_h: Optional[int] = None
     color: str = "#ff0000"
     fill_color: str = "#ff000020"
+    
+    class Config:
+        # Permitir conversão automática de tipos
+        json_encoders = {
+            float: lambda v: float(v),
+            int: lambda v: int(v)
+        }
 

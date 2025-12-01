@@ -216,12 +216,19 @@ class CameraService:
 
     @staticmethod
     def configure_detection_zone(db: Session, camera_id: int, detection_zone: dict) -> Optional[Camera]:
-        """Configurar zona de detecção"""
+        """Configurar zona de detecção (suporta múltiplas zonas)"""
         db_camera = db.query(Camera).filter(Camera.id == camera_id).first()
         if not db_camera:
             return None
 
-        db_camera.detection_zone = detection_zone
+        # Se veio 'zones' (array), usar isso; senão, usar formato antigo (single zone)
+        if 'zones' in detection_zone and isinstance(detection_zone['zones'], list):
+            # Novo formato: múltiplas zonas
+            db_camera.detection_zone = {'zones': detection_zone['zones'], 'ref_w': detection_zone.get('ref_w'), 'ref_h': detection_zone.get('ref_h')}
+        else:
+            # Formato antigo: zona única (compatibilidade)
+            db_camera.detection_zone = detection_zone
+        
         db.commit()
         db.refresh(db_camera)
         return db_camera
