@@ -155,6 +155,15 @@ export const authService = {
     const response = await api.get('/auth/me');
     return response.data;
   },
+
+  // Atualizar perfil do usuário atual
+  updateProfile: async (userData: {
+    email?: string;
+    full_name?: string;
+  }): Promise<User> => {
+    const response = await api.put('/auth/me', userData);
+    return response.data;
+  },
 };
 
 export const webcamService = {

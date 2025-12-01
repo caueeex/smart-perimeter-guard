@@ -14,7 +14,6 @@ import LiveStream from "@/components/LiveStream";
 import CameraConfigSimple from "@/components/CameraConfigSimple";
 import WebcamSelector from "@/components/WebcamSelector";
 import StreamTest from "@/components/StreamTest";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cameraService, Camera as CameraType } from "@/services/api";
 
 const Cameras = () => {
@@ -136,7 +135,7 @@ const Cameras = () => {
 
   const handleAddCamera = async () => {
     if (!newCamera.name || !newCamera.stream_url) {
-      toast.error("Nome e URL do stream são obrigatórios");
+      toast.error("Nome e câmera são obrigatórios");
       return;
     }
 
@@ -259,13 +258,7 @@ const Cameras = () => {
               <DialogTitle>Adicionar Nova Câmera</DialogTitle>
               <DialogDescription>Configure os parâmetros da nova câmera</DialogDescription>
             </DialogHeader>
-            <Tabs defaultValue="webcam" className="pt-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="webcam">Câmera do PC</TabsTrigger>
-                <TabsTrigger value="ip">Câmera IP</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="webcam" className="space-y-4 mt-4">
+            <div className="space-y-4 pt-4">
                 <WebcamSelector onSelect={handleWebcamSelect} />
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -326,79 +319,7 @@ const Cameras = () => {
                     {isAddingCamera ? "Adicionando..." : "Adicionar Câmera"}
                   </Button>
                 </div>
-              </TabsContent>
-              
-              <TabsContent value="ip" className="space-y-4 mt-4">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Nome da Câmera</Label>
-                    <Input 
-                      placeholder="Ex: Câmera Entrada" 
-                      className="bg-background border-border"
-                      value={newCamera.name}
-                      onChange={(e) => setNewCamera({...newCamera, name: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Localização</Label>
-                    <Input 
-                      placeholder="Ex: Setor A - Corredor 1" 
-                      className="bg-background border-border"
-                      value={newCamera.location}
-                      onChange={(e) => setNewCamera({...newCamera, location: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>URL do Stream</Label>
-                    <Input 
-                      placeholder="rtsp://..." 
-                      className="bg-background border-border"
-                      value={newCamera.stream_url}
-                      onChange={(e) => setNewCamera({...newCamera, stream_url: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Zona</Label>
-                    <Select value={newCamera.zone} onValueChange={(value) => setNewCamera({...newCamera, zone: value})}>
-                      <SelectTrigger className="bg-background border-border">
-                        <SelectValue placeholder="Selecione a zona" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="A1">Zona A1</SelectItem>
-                        <SelectItem value="A2">Zona A2</SelectItem>
-                        <SelectItem value="B1">Zona B1</SelectItem>
-                        <SelectItem value="B2">Zona B2</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center justify-between pt-2">
-                    <Label>Detecção Automática</Label>
-                    <Switch 
-                      checked={newCamera.detection_enabled}
-                      onCheckedChange={(checked) => setNewCamera({...newCamera, detection_enabled: checked})}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Sensibilidade</Label>
-                    <Input 
-                      type="number" 
-                      min="1" 
-                      max="100" 
-                      value={newCamera.sensitivity}
-                      onChange={(e) => setNewCamera({...newCamera, sensitivity: parseInt(e.target.value)})}
-                      className="bg-background border-border"
-                    />
-                  </div>
-                  <Button 
-                    onClick={handleAddCamera} 
-                    disabled={isAddingCamera}
-                    className="w-full bg-gradient-primary hover:opacity-90"
-                  >
-                    {isAddingCamera ? "Adicionando..." : "Adicionar Câmera"}
-                  </Button>
-                </div>
-              </TabsContent>
-            </Tabs>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

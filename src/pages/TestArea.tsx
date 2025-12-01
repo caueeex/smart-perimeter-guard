@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import Layout from "@/components/Layout";
 import { toast } from "sonner";
 import { cameraService, eventService } from "@/services/api";
+import { useSettings } from "@/contexts/SettingsContext";
 import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
@@ -54,6 +55,7 @@ interface DetectionResult {
 }
 
 const TestArea = () => {
+  const { detection: detectionSettings } = useSettings();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const detectionModelRef = useRef<cocoSsd.ObjectDetection | null>(null);
@@ -92,6 +94,8 @@ const TestArea = () => {
   }>>([]);
   const [isLoadingCameras, setIsLoadingCameras] = useState(false);
   const lastEventAtRef = useRef<number>(0);
+  // Cooldown para alertas (evitar spam de alertas duplicados)
+  const lastAlertTimeRef = useRef<Map<string, number>>(new Map()); // Map<areaId-objectClass, timestamp>
 
   // Carregar câmeras do backend
   useEffect(() => {
@@ -277,8 +281,12 @@ const TestArea = () => {
         });
         
         // Filtrar apenas objetos relevantes (pessoas, animais, veículos)
+        // Usar limiar de confiança das configurações
+        const confidenceThreshold = detectionSettings?.confidence || 0.5;
         const relevantClasses = ['person', 'dog', 'cat', 'bird', 'car', 'truck', 'motorcycle', 'bicycle'];
-        const relevantObjects = predictions.filter(pred => relevantClasses.includes(pred.class) && pred.score > 0.3);
+        const relevantObjects = predictions.filter(pred => 
+          relevantClasses.includes(pred.class) && pred.score >= confidenceThreshold
+        );
         
         console.log("Objetos relevantes encontrados:", relevantObjects.length);
 
@@ -308,8 +316,24 @@ const TestArea = () => {
         
         // Verificar intrusões em cada área ativa
         // IMPORTANTE: Verificar se o CENTRO do objeto está dentro da zona (igual ao backend)
+        if (testAreas.length === 0) {
+          console.log("⚠️ Nenhuma área criada ainda");
+          return;
+        }
+        
+        const activeAreas = testAreas.filter(a => a.isActive);
+        if (activeAreas.length === 0) {
+          console.log("⚠️ Nenhuma área ativa");
+          return;
+        }
+        
+        console.log(`🔍 Verificando ${activeAreas.length} área(s) ativa(s) contra ${detectedObjects.length} objeto(s) detectado(s)`);
+        
         testAreas.forEach(area => {
-          if (!area.isActive) return;
+          if (!area.isActive) {
+            console.log(`⏭️ Área "${area.name}" está inativa, pulando...`);
+            return;
+          }
           
           detectedObjects.forEach(obj => {
             // Verificar se o centro do objeto está dentro da zona (igual ao backend)
@@ -342,21 +366,51 @@ const TestArea = () => {
               confidence: obj.confidence
             });
             
+            // Verificar cooldown para evitar alertas duplicados (5 segundos por área+objeto)
+            const alertKey = `${area.id}-${obj.class}`;
+            const now = Date.now();
+            const lastAlertTime = lastAlertTimeRef.current.get(alertKey) || 0;
+            const timeSinceLastAlert = now - lastAlertTime;
+            const ALERT_COOLDOWN = 5000; // 5 segundos
+            
+            if (timeSinceLastAlert < ALERT_COOLDOWN) {
+              console.log(`⏳ Alerta em cooldown para ${area.name} - ${obj.class} (${Math.round((ALERT_COOLDOWN - timeSinceLastAlert) / 1000)}s restantes)`);
+              // Ainda conta como intrusão, mas não cria novo alerta
+            } else {
+              // Atualizar timestamp do último alerta
+              lastAlertTimeRef.current.set(alertKey, now);
+              
+              // Adicionar alerta
+              const alert = {
+                id: `${alertKey}-${now}`, // ID único baseado em área+objeto+timestamp
+                message: `🚨 INTRUSÃO DETECTADA! ${obj.class} invadiu a área "${area.name}"`,
+                type: 'intrusion' as const,
+                timestamp: new Date()
+              };
+              
+              setAlerts(prev => {
+                // Verificar se já existe alerta com mesmo ID (evitar duplicatas)
+                const exists = prev.some(a => a.id === alert.id);
+                if (exists) {
+                  console.log("⚠️ Alerta duplicado ignorado:", alert.id);
+                  return prev;
+                }
+                const newAlerts = [alert, ...prev.slice(0, 9)]; // Manter apenas 10 alertas
+                console.log(`📢 Novo alerta criado! Total de alertas: ${newAlerts.length}`, alert);
+                return newAlerts;
+              });
+              
+              // Toast para feedback visual imediato
+              toast.error(`🚨 Intrusão detectada na área "${area.name}"!`, {
+                description: `${obj.class} detectado com ${Math.round(obj.confidence * 100)}% de confiança`
+              });
+            }
+            
             intrusions.push({
               object: obj,
               area: area.name,
               timestamp: new Date()
             });
-            
-            // Adicionar alerta
-            const alert = {
-              id: Date.now().toString(),
-              message: `🚨 INTRUSÃO DETECTADA! ${obj.class} invadiu a área "${area.name}"`,
-              type: 'intrusion' as const,
-              timestamp: new Date()
-            };
-            
-            setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Manter apenas 10 alertas
             
             // Atualizar contador de intrusões
             setTestAreas(prev => prev.map(a => 
@@ -410,7 +464,7 @@ const TestArea = () => {
       rafId = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(rafId);
-  }, [isMonitoring, testAreas, videoContainerRect]);
+  }, [isMonitoring, testAreas, videoContainerRect, detectionSettings, selectedCamera]);
 
   // Função para calcular área de um polígono (Shoelace formula) - igual ao Cameras.tsx
   const calculatePolygonArea = (points: Array<{x: number; y: number}>): number => {
@@ -978,49 +1032,54 @@ const TestArea = () => {
           const centerY = obj.center[1];
           const radius = Math.max((x2 - x1), (y2 - y1)) / 2 + 10;
           
-          // Desenhar círculo ao redor do objeto
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-          ctx.strokeStyle = '#ef4444'; // Vermelho para intrusos
-          ctx.lineWidth = 4;
-          ctx.stroke();
+          // Desenhar caixas de detecção (se habilitado)
+          if (detectionSettings?.showBoundingBoxes !== false) {
+            // Desenhar círculo ao redor do objeto
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#ef4444'; // Vermelho para intrusos
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            
+            // Desenhar círculo interno
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius - 8, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Desenhar círculo pulsante
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius + 10, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
           
-          // Desenhar círculo interno
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius - 8, 0, 2 * Math.PI);
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          
-          // Desenhar círculo pulsante
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius + 10, 0, 2 * Math.PI);
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          
-          // Desenhar label com fundo
-          const label = `${obj.class} (${Math.round(obj.confidence * 100)}%)`;
-          ctx.font = 'bold 16px Arial';
-          const textWidth = ctx.measureText(label).width;
-          
-          // Fundo do label maior e mais visível
-          ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
-          ctx.fillRect(x1, y1 - 30, textWidth + 15, 25);
-          
-          // Borda do label
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x1, y1 - 30, textWidth + 15, 25);
-          
-          // Texto do label
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(label, x1 + 7, y1 - 12);
-          
-          // Indicador de intrusão
-          ctx.fillStyle = '#ff0000';
-          ctx.font = 'bold 20px Arial';
-          ctx.fillText('🚨 INTRUSÃO!', x1, y1 - 40);
+          // Desenhar label com fundo (se habilitado)
+          if (detectionSettings?.showLabels !== false) {
+            const label = `${obj.class} (${Math.round(obj.confidence * 100)}%)`;
+            ctx.font = 'bold 16px Arial';
+            const textWidth = ctx.measureText(label).width;
+            
+            // Fundo do label maior e mais visível
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+            ctx.fillRect(x1, y1 - 30, textWidth + 15, 25);
+            
+            // Borda do label
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x1, y1 - 30, textWidth + 15, 25);
+            
+            // Texto do label
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(label, x1 + 7, y1 - 12);
+            
+            // Indicador de intrusão
+            ctx.fillStyle = '#ff0000';
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText('🚨 INTRUSÃO!', x1, y1 - 40);
+          }
           
           // Desenhar centro do objeto
           ctx.beginPath();
@@ -1541,22 +1600,28 @@ const TestArea = () => {
                     Nenhum alerta ainda. Inicie o monitoramento para detectar intrusões.
                   </p>
                 ) : (
-                  alerts.map(alert => (
-                    <Alert key={alert.id} className={`${
-                      alert.type === 'intrusion' ? 'border-red-500 bg-red-50' :
-                      alert.type === 'warning' ? 'border-yellow-500 bg-yellow-50' :
-                      'border-green-500 bg-green-50'
-                    }`}>
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertDescription className="text-sm">
-                        {alert.message}
-                        <br />
-                        <span className="text-xs text-muted-foreground">
-                          {alert.timestamp.toLocaleTimeString()}
-                        </span>
-                      </AlertDescription>
-                    </Alert>
-                  ))
+                  alerts.map(alert => {
+                    console.log("📋 Renderizando alerta:", alert);
+                    return (
+                      <Alert key={alert.id} className={`${
+                        alert.type === 'intrusion' ? 'border-red-500 bg-red-50 dark:bg-red-950/20' :
+                        alert.type === 'warning' ? 'border-yellow-500 bg-yellow-50 dark:bg-yellow-950/20' :
+                        'border-green-500 bg-green-50 dark:bg-green-950/20'
+                      }`}>
+                        <AlertTriangle className={`h-4 w-4 ${
+                          alert.type === 'intrusion' ? 'text-red-600' :
+                          alert.type === 'warning' ? 'text-yellow-600' :
+                          'text-green-600'
+                        }`} />
+                        <AlertDescription className="text-sm">
+                          <div className="font-semibold">{alert.message}</div>
+                          <span className="text-xs text-muted-foreground mt-1 block">
+                            {alert.timestamp.toLocaleTimeString()}
+                          </span>
+                        </AlertDescription>
+                      </Alert>
+                    );
+                  })
                 )}
               </div>
             </Card>

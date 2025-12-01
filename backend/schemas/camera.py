@@ -11,7 +11,7 @@ class CameraBase(BaseModel):
     """Schema base de câmera"""
     name: str
     location: Optional[str] = None
-    stream_url: str
+    stream_url: str  # Não usar HttpUrl para permitir URLs RTSP e outras
     zone: Optional[str] = None
     detection_enabled: bool = True
     sensitivity: int = 50

@@ -24,34 +24,64 @@ class CameraService:
     @staticmethod
     def create_camera(db: Session, camera: CameraCreate) -> Camera:
         """Criar nova câmera"""
-        # Verificar se nome já existe
-        if db.query(Camera).filter(Camera.name == camera.name).first():
+        try:
+            # Verificar se nome já existe
+            existing_camera = db.query(Camera).filter(Camera.name == camera.name).first()
+            if existing_camera:
+                logger.warning(f"Tentativa de criar câmera com nome duplicado: {camera.name}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nome da câmera já existe"
+                )
+
+            # Validar campos obrigatórios
+            if not camera.name or not camera.name.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nome da câmera é obrigatório"
+                )
+            
+            if not camera.stream_url or not camera.stream_url.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="URL do stream é obrigatória"
+                )
+
+            # Criar câmera
+            db_camera = Camera(
+                name=camera.name.strip(),
+                location=camera.location.strip() if camera.location else None,
+                stream_url=camera.stream_url.strip(),
+                zone=camera.zone.strip() if camera.zone else None,
+                detection_enabled=camera.detection_enabled if camera.detection_enabled is not None else True,
+                sensitivity=camera.sensitivity if camera.sensitivity is not None else 50,
+                fps=camera.fps if camera.fps is not None else 15,
+                resolution=camera.resolution if camera.resolution else "640x480"
+            )
+            
+            db.add(db_camera)
+            db.commit()
+            db.refresh(db_camera)
+            
+            logger.info(f"Câmera criada no banco: ID={db_camera.id}, Name={db_camera.name}")
+            
+            return db_camera
+        except HTTPException:
+            raise
+        except IntegrityError as e:
+            db.rollback()
+            logger.error(f"Erro de integridade ao criar câmera: {e}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nome da câmera já existe"
+                detail=f"Erro ao criar câmera: {str(e)}"
             )
-
-        # Criar câmera
-        db_camera = Camera(
-            name=camera.name,
-            location=camera.location,
-            stream_url=camera.stream_url,
-            zone=camera.zone,
-            detection_enabled=camera.detection_enabled,
-            sensitivity=camera.sensitivity,
-            fps=camera.fps,
-            resolution=camera.resolution
-        )
-        
-        db.add(db_camera)
-        db.commit()
-        db.refresh(db_camera)
-        
-        # Iniciar monitoramento se detecção estiver habilitada
-        if camera.detection_enabled:
-            detection_service.start_monitoring(db_camera.id, camera.stream_url)
-        
-        return db_camera
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Erro inesperado ao criar câmera: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro interno ao criar câmera: {str(e)}"
+            )
 
     @staticmethod
     def get_camera(db: Session, camera_id: int) -> Optional[Camera]:

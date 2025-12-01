@@ -15,46 +15,37 @@ import {
   Save,
   Info,
   Eye,
-  AlertTriangle
+  AlertTriangle,
+  Edit,
+  Loader2
 } from "lucide-react";
 import Layout from "@/components/Layout";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authService, apiUtils } from "@/services/api";
+import { useSettings } from "@/contexts/SettingsContext";
 
 const Settings = () => {
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [userInfo, setUserInfo] = useState<any>(null);
-  
-  // Configurações de Notificações
-  const [notifications, setNotifications] = useState({
-    email: true,
-    push: true,
-    sound: true,
-    intrusion: true,
-    movement: true,
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileData, setProfileData] = useState({
+    full_name: "",
+    email: "",
   });
 
-  // Configurações de Detecção
-  const [detection, setDetection] = useState({
-    confidence: 0.5,
-    showBoundingBoxes: true,
-    showLabels: true,
-  });
-
-  // Configurações de Interface
-  const [interfaceSettings, setInterfaceSettings] = useState({
-    theme: "dark",
-    language: "pt-BR",
-    autoRefresh: true,
-    refreshInterval: 5,
-  });
+  const {
+    notifications,
+    detection,
+    interface: interfaceSettings,
+    updateNotifications,
+    updateDetection,
+    updateInterface,
+    saveSettings,
+  } = useSettings();
 
   useEffect(() => {
-    // Carregar configurações primeiro (síncrono, não pode travar)
-    loadSettings();
-    
-    // Carregar informações do usuário depois (assíncrono)
     loadUserInfo().catch((error) => {
       console.error("Erro ao carregar informações do usuário:", error);
     });
@@ -66,11 +57,19 @@ const Settings = () => {
       const cachedUser = apiUtils.getUser();
       if (cachedUser) {
         setUserInfo(cachedUser);
+        setProfileData({
+          full_name: cachedUser.full_name || "",
+          email: cachedUser.email || "",
+        });
       }
       
       // Depois atualiza com dados da API
       const user = await authService.getCurrentUser();
       setUserInfo(user);
+      setProfileData({
+        full_name: user.full_name || "",
+        email: user.email || "",
+      });
       apiUtils.setUser(user); // Atualizar cache
     } catch (error) {
       console.error("Erro ao carregar informações do usuário:", error);
@@ -78,57 +77,57 @@ const Settings = () => {
       const cachedUser = apiUtils.getUser();
       if (cachedUser) {
         setUserInfo(cachedUser);
+        setProfileData({
+          full_name: cachedUser.full_name || "",
+          email: cachedUser.email || "",
+        });
       }
     }
   };
 
-  const loadSettings = () => {
-    try {
-      // Carregar configurações do localStorage
-      const savedNotifications = localStorage.getItem("settings_notifications");
-      const savedDetection = localStorage.getItem("settings_detection");
-      const savedInterface = localStorage.getItem("settings_interface");
-
-      if (savedNotifications) {
-        try {
-          setNotifications(JSON.parse(savedNotifications));
-        } catch (e) {
-          console.warn("Erro ao parsear configurações de notificações:", e);
-        }
-      }
-      if (savedDetection) {
-        try {
-          setDetection(JSON.parse(savedDetection));
-        } catch (e) {
-          console.warn("Erro ao parsear configurações de detecção:", e);
-        }
-      }
-      if (savedInterface) {
-        try {
-          setInterfaceSettings(JSON.parse(savedInterface));
-        } catch (e) {
-          console.warn("Erro ao parsear configurações de interface:", e);
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao carregar configurações:", error);
-    }
-  };
-
-  const saveSettings = async () => {
+  const handleSaveAllSettings = async () => {
     setIsLoading(true);
     try {
-      // Salvar no localStorage
-      localStorage.setItem("settings_notifications", JSON.stringify(notifications));
-      localStorage.setItem("settings_detection", JSON.stringify(detection));
-      localStorage.setItem("settings_interface", JSON.stringify(interfaceSettings));
-
+      await saveSettings();
       toast.success("Configurações salvas com sucesso!");
     } catch (error) {
       console.error("Erro ao salvar configurações:", error);
       toast.error("Erro ao salvar configurações");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    // Validar dados antes de iniciar o loading
+    if (!profileData.email || !profileData.email.includes('@')) {
+      toast.error("Email inválido");
+      return;
+    }
+
+    setIsSavingProfile(true);
+    try {
+      // Atualizar perfil via API
+      const updatedUser = await authService.updateProfile({
+        email: profileData.email,
+        full_name: profileData.full_name,
+      });
+
+      // Atualizar estado e cache
+      setUserInfo(updatedUser);
+      apiUtils.setUser(updatedUser);
+      setProfileData({
+        full_name: updatedUser.full_name || "",
+        email: updatedUser.email || "",
+      });
+      setIsEditingProfile(false);
+      toast.success("Perfil atualizado com sucesso!");
+    } catch (error: any) {
+      console.error("Erro ao salvar perfil:", error);
+      const errorMessage = error.response?.data?.detail || "Erro ao salvar perfil";
+      toast.error(errorMessage);
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -146,11 +145,15 @@ const Settings = () => {
             </p>
           </div>
           <Button 
-            onClick={saveSettings} 
+            onClick={handleSaveAllSettings} 
             disabled={isLoading}
             className="flex items-center gap-2"
           >
-            <Save className="w-4 h-4" />
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             Salvar Todas
           </Button>
         </div>
@@ -178,9 +181,22 @@ const Settings = () => {
           {/* Aba Perfil */}
           <TabsContent value="profile" className="space-y-4">
             <Card className="p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <User className="w-5 h-5 text-primary" />
-                <h2 className="text-xl font-semibold">Informações do Perfil</h2>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <User className="w-5 h-5 text-primary" />
+                  <h2 className="text-xl font-semibold">Informações do Perfil</h2>
+                </div>
+                {!isEditingProfile && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditingProfile(true)}
+                    className="flex items-center gap-2"
+                  >
+                    <Edit className="w-4 h-4" />
+                    Editar
+                  </Button>
+                )}
               </div>
               
               {userInfo ? (
@@ -199,11 +215,23 @@ const Settings = () => {
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
-                        value={userInfo.email || ""}
-                        disabled
+                        value={isEditingProfile ? profileData.email : userInfo.email || ""}
+                        disabled={!isEditingProfile}
+                        onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
                         className="mt-1"
                       />
                     </div>
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="full_name">Nome Completo</Label>
+                    <Input
+                      id="full_name"
+                      value={isEditingProfile ? profileData.full_name : userInfo.full_name || ""}
+                      disabled={!isEditingProfile}
+                      onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
+                      className="mt-1"
+                    />
                   </div>
                   
                   <div>
@@ -215,6 +243,35 @@ const Settings = () => {
                       className="mt-1"
                     />
                   </div>
+
+                  {isEditingProfile && (
+                    <div className="flex gap-2 pt-4">
+                      <Button
+                        onClick={handleSaveProfile}
+                        disabled={isSavingProfile}
+                        className="flex items-center gap-2"
+                      >
+                        {isSavingProfile ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Save className="w-4 h-4" />
+                        )}
+                        Salvar Alterações
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setIsEditingProfile(false);
+                          setProfileData({
+                            full_name: userInfo.full_name || "",
+                            email: userInfo.email || "",
+                          });
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-muted-foreground">Carregando informações...</p>
@@ -242,7 +299,7 @@ const Settings = () => {
                     id="notif-email"
                     checked={notifications.email}
                     onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, email: checked })
+                      updateNotifications({ email: checked })
                     }
                   />
                 </div>
@@ -260,7 +317,7 @@ const Settings = () => {
                     id="notif-push"
                     checked={notifications.push}
                     onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, push: checked })
+                      updateNotifications({ push: checked })
                     }
                   />
                 </div>
@@ -278,7 +335,7 @@ const Settings = () => {
                     id="notif-sound"
                     checked={notifications.sound}
                     onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, sound: checked })
+                      updateNotifications({ sound: checked })
                     }
                   />
                 </div>
@@ -296,7 +353,7 @@ const Settings = () => {
                     id="notif-intrusion"
                     checked={notifications.intrusion}
                     onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, intrusion: checked })
+                      updateNotifications({ intrusion: checked })
                     }
                   />
                 </div>
@@ -314,7 +371,7 @@ const Settings = () => {
                     id="notif-movement"
                     checked={notifications.movement}
                     onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, movement: checked })
+                      updateNotifications({ movement: checked })
                     }
                   />
                 </div>
@@ -342,10 +399,7 @@ const Settings = () => {
                     step={0.05}
                     value={[detection.confidence]}
                     onValueChange={(value) =>
-                      setDetection({
-                        ...detection,
-                        confidence: value[0],
-                      })
+                      updateDetection({ confidence: value[0] })
                     }
                     className="w-full"
                   />
@@ -367,7 +421,7 @@ const Settings = () => {
                     id="show-bboxes"
                     checked={detection.showBoundingBoxes}
                     onCheckedChange={(checked) =>
-                      setDetection({ ...detection, showBoundingBoxes: checked })
+                      updateDetection({ showBoundingBoxes: checked })
                     }
                   />
                 </div>
@@ -385,7 +439,7 @@ const Settings = () => {
                     id="show-labels"
                     checked={detection.showLabels}
                     onCheckedChange={(checked) =>
-                      setDetection({ ...detection, showLabels: checked })
+                      updateDetection({ showLabels: checked })
                     }
                   />
                 </div>
@@ -413,10 +467,7 @@ const Settings = () => {
                     step={1}
                     value={[interfaceSettings.refreshInterval]}
                     onValueChange={(value) =>
-                      setInterfaceSettings({
-                        ...interfaceSettings,
-                        refreshInterval: value[0],
-                      })
+                      updateInterface({ refreshInterval: value[0] })
                     }
                     className="w-full"
                   />
@@ -438,10 +489,7 @@ const Settings = () => {
                     id="auto-refresh"
                     checked={interfaceSettings.autoRefresh}
                     onCheckedChange={(checked) =>
-                      setInterfaceSettings({
-                        ...interfaceSettings,
-                        autoRefresh: checked,
-                      })
+                      updateInterface({ autoRefresh: checked })
                     }
                   />
                 </div>
@@ -454,10 +502,7 @@ const Settings = () => {
                     id="language"
                     value={interfaceSettings.language}
                     onChange={(e) =>
-                      setInterfaceSettings({
-                        ...interfaceSettings,
-                        language: e.target.value,
-                      })
+                      updateInterface({ language: e.target.value })
                     }
                     className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground"
                   >
@@ -498,4 +543,3 @@ const Settings = () => {
 };
 
 export default Settings;
-

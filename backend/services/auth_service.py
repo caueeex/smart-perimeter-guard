@@ -145,6 +145,49 @@ class AuthService:
         return current_user
 
     @staticmethod
+    def update_user(db: Session, user_id: int, user_update) -> User:
+        """Atualizar usuário"""
+        
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Usuário não encontrado"
+            )
+        
+        # Verificar se email já existe (se estiver sendo alterado)
+        if user_update.email and user_update.email != user.email:
+            existing_user = db.query(User).filter(User.email == user_update.email).first()
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email já cadastrado"
+                )
+        
+        # Verificar se username já existe (se estiver sendo alterado)
+        if user_update.username and user_update.username != user.username:
+            existing_user = db.query(User).filter(User.username == user_update.username).first()
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username já cadastrado"
+                )
+        
+        # Atualizar campos
+        if user_update.email is not None:
+            user.email = user_update.email
+        if user_update.username is not None:
+            user.username = user_update.username
+        if user_update.full_name is not None:
+            user.full_name = user_update.full_name
+        if user_update.is_active is not None:
+            user.is_active = user_update.is_active
+        
+        db.commit()
+        db.refresh(user)
+        return user
+
+    @staticmethod
     def get_current_user_optional(
         credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
         db: Session = Depends(get_db)

@@ -52,6 +52,25 @@ class Settings(BaseSettings):
     default_fps: int = Field(default=15, env="DEFAULT_FPS")
     default_resolution: str = Field(default="640x480", env="DEFAULT_RESOLUTION")
     
+    # Configurações de Email (SMTP)
+    smtp_server: str = Field(default="smtp.gmail.com", env="SMTP_SERVER")
+    smtp_port: int = Field(default=587, env="SMTP_PORT")
+    smtp_user: Optional[str] = Field(default=None, env="SMTP_USER")
+    smtp_password: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
+    smtp_from_email: Optional[str] = Field(default=None, env="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="SecureVision", env="SMTP_FROM_NAME")
+    smtp_use_tls: bool = Field(default=True, env="SMTP_USE_TLS")
+    
+    # Destinatários de alertas de intrusão
+    # Opções:
+    # - "all_users": Envia para todos os usuários ativos
+    # - "admins_only": Envia apenas para administradores
+    # - "custom": Usa apenas os emails em ALERT_EMAILS
+    alert_recipient_mode: str = Field(default="admins_only", env="ALERT_RECIPIENT_MODE")
+    # Emails adicionais para receber alertas (separados por vírgula)
+    # Exemplo: "email1@exemplo.com,email2@exemplo.com"
+    alert_emails: Optional[str] = Field(default=None, env="ALERT_EMAILS")
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

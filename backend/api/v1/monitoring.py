@@ -24,7 +24,7 @@ def restart_all_detections(
         for cam in cameras:
             if cam.detection_enabled and cam.stream_url:
                 detection_service.stop_monitoring(cam.id)
-                detection_service.start_monitoring(cam.id, cam.stream_url)
+                detection_service.start_monitoring(cam.id, cam.stream_url, current_user.email)
                 restarted += 1
         return {"success": True, "restarted": restarted}
     except Exception as e:
@@ -183,7 +183,7 @@ def restart_camera_detection(
         
         # Reiniciar se detecção estiver habilitada
         if camera.detection_enabled:
-            detection_service.start_monitoring(camera_id, camera.stream_url)
+            detection_service.start_monitoring(camera_id, camera.stream_url, current_user.email)
             return {"message": f"Detecção reiniciada para câmera {camera_id}", "success": True}
         else:
             return {"message": f"Detecção desabilitada para câmera {camera_id}", "success": True}

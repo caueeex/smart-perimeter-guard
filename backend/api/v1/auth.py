@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from database import get_db
-from schemas.user import User, UserCreate, Token
+from schemas.user import User, UserCreate, UserUpdate, Token
 from services.auth_service import AuthService
 from config import settings
 
@@ -43,4 +43,19 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 def read_users_me(current_user: User = Depends(AuthService.get_current_active_user)):
     """Obter dados do usuário atual"""
     return current_user
+
+
+@router.put("/me", response_model=User)
+def update_users_me(
+    user_update: UserUpdate,
+    current_user: User = Depends(AuthService.get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Atualizar dados do usuário atual"""
+    # Não permitir alterar role ou is_active pelo próprio usuário
+    user_update.role = None
+    user_update.is_active = None
+    
+    updated_user = AuthService.update_user(db, current_user.id, user_update)
+    return updated_user
 

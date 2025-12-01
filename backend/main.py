@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -128,10 +129,31 @@ async def health_check():
     }
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handler para erros de validação do Pydantic"""
+    origin = request.headers.get("origin") or "*"
+    errors = exc.errors()
+    logger.error(f"Erro de validação: {errors}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Erro de validação dos dados",
+            "errors": errors
+        },
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handler global de exceções"""
     origin = request.headers.get("origin") or "*"
+    logger.error(f"Erro não tratado: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={

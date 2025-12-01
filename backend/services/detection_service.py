@@ -39,6 +39,10 @@ class DetectionService:
         self.last_detection_time: Dict[int, float] = {}
         self.detection_cooldown = 3.0  # Cooldown reduzido para 3 segundos
         
+        # Cooldown específico para emails (evitar spam)
+        self.last_email_time: Dict[int, float] = {}
+        self.email_cooldown = 30.0  # Enviar apenas 1 email a cada 60 segundos por câmera
+        
         # Configurações avançadas
         self.min_confidence = 0.5
         self.min_area = 1000  # Área mínima para considerar movimento significativo
@@ -46,6 +50,9 @@ class DetectionService:
         
         # Background subtractors para cada câmera
         self.bg_subtractors: Dict[int, cv2.BackgroundSubtractor] = {}
+        
+        # Armazenar email do usuário logado por câmera
+        self.camera_user_emails: Dict[int, str] = {}
         
         self.load_model()
 
@@ -143,13 +150,24 @@ class DetectionService:
         """Verificar se o modelo YOLO está carregado"""
         return self.model is not None
 
-    def start_monitoring(self, camera_id: int, stream_url: str):
-        """Iniciar monitoramento de câmera"""
+    def start_monitoring(self, camera_id: int, stream_url: str, user_email: Optional[str] = None):
+        """Iniciar monitoramento de câmera
+        
+        Args:
+            camera_id: ID da câmera
+            stream_url: URL do stream
+            user_email: Email do usuário logado (opcional)
+        """
         if camera_id in self.active_monitors:
             logger.info(f"Parando monitoramento existente da câmera {camera_id} antes de reiniciar")
             self.stop_monitoring(camera_id)
 
         self.active_monitors[camera_id] = True
+        
+        # Armazenar email do usuário logado
+        if user_email:
+            self.camera_user_emails[camera_id] = user_email
+            logger.info(f"Email do usuário logado armazenado para câmera {camera_id}: {user_email}")
         
         # Inicializar sistemas de rastreamento
         self.tracking_data[camera_id] = {
@@ -186,6 +204,9 @@ class DetectionService:
 
     def stop_monitoring(self, camera_id: int):
         """Parar monitoramento de câmera"""
+        # Remover email armazenado
+        if camera_id in self.camera_user_emails:
+            del self.camera_user_emails[camera_id]
         if camera_id in self.active_monitors:
             self.active_monitors[camera_id] = False
             if camera_id in self.camera_threads:
@@ -363,17 +384,30 @@ class DetectionService:
             # 4. Rastreamento de objetos (para linha ou modo básico - apenas se NÃO há zona configurada)
             # Se há zona configurada, já verificamos acima e retornamos
             if not zone_config:
-                tracked_objects = self._track_objects(frame, camera_id, objects)
-                if tracked_objects:
-                    logger.debug(f"📊 {len(tracked_objects)} objeto(s) sendo rastreado(s) na câmera {camera_id}")
-                
-                # 5. Verificar intrusão com objetos rastreados (para linha ou modo básico)
-                if tracked_objects:
-                    intrusion = self._check_advanced_intrusion(
-                        frame, tracked_objects, detection_line, detection_zone
-                    )
-                    if intrusion:
-                        return True
+                # Se há linha configurada, precisa rastrear para detectar cruzamento
+                if line_config:
+                    tracked_objects = self._track_objects(frame, camera_id, objects)
+                    if tracked_objects:
+                        logger.info(f"📊 {len(tracked_objects)} objeto(s) sendo rastreado(s) na câmera {camera_id}")
+                        intrusion = self._check_advanced_intrusion(
+                            frame, tracked_objects, detection_line, detection_zone
+                        )
+                        if intrusion:
+                            logger.warning(f"🚨 INTRUSÃO DETECTADA via rastreamento (câmera {camera_id})")
+                            return True
+                else:
+                    # MODO BÁSICO: Sem zona nem linha - verificar diretamente objetos detectados
+                    # Não precisa rastrear, pode acionar imediatamente
+                    if objects:
+                        logger.debug(f"🔍 Modo básico: verificando {len(objects)} objeto(s) detectado(s) diretamente")
+                        intrusion = self._check_advanced_intrusion(
+                            frame, objects, detection_line, detection_zone
+                        )
+                        if intrusion:
+                            logger.warning(f"🚨 INTRUSÃO DETECTADA via modo básico (câmera {camera_id})")
+                            return True
+                        else:
+                            logger.debug(f"  ⚠️ Objetos detectados mas não acionaram intrusão (verificar critérios)")
             
             # 6. Se não há objetos YOLO mas houve movimento e existe zona, verificar movimento na zona
             # IMPORTANTE: Só verificar movimento se não há objetos YOLO (para evitar duplicação)
@@ -573,14 +607,21 @@ class DetectionService:
             if not line_config and not zone_config:
                 # Filtrar apenas objetos com alta confiança e área significativa
                 for obj in objects:
-                    if obj['confidence'] >= 0.6 and obj['area'] > 2000:  # Área mínima de 2000 pixels
-                        logger.warning(f"Intrusão detectada (modo básico): {obj['class']} detectado "
+                    conf_ok = obj['confidence'] >= 0.6
+                    area_ok = obj['area'] > 2000
+                    if conf_ok and area_ok:
+                        logger.warning(f"🚨 INTRUSÃO DETECTADA (modo básico): {obj['class']} detectado "
                                      f"(confiança: {obj['confidence']:.2f}, área: {obj['area']} pixels)")
                         return True
+                    else:
+                        # Log detalhado quando não atende critérios
+                        logger.debug(f"  ⚠️ {obj['class']} não atende critérios: conf={obj['confidence']:.2f} {'✅' if conf_ok else '❌'} (precisa >=0.6), "
+                                   f"área={obj['area']} {'✅' if area_ok else '❌'} (precisa >2000px)")
                 # Log quando detecta objetos mas não atende critérios
                 if objects:
-                    logger.debug(f"Objetos detectados mas não atendem critérios de intrusão "
-                               f"(precisa conf>=0.6 e área>2000px): {[(o['class'], o['confidence'], o['area']) for o in objects]}")
+                    obj_details = [(o['class'], f"{o['confidence']:.2f}", o['area']) for o in objects]
+                    logger.info(f"  ℹ️ {len(objects)} objeto(s) detectado(s) mas não atendem critérios de intrusão "
+                               f"(precisa conf>=0.6 e área>2000px): {obj_details}")
             
             return False
             
@@ -831,6 +872,105 @@ class DetectionService:
                     asyncio.run(manager.broadcast(payload))
             except Exception as notif_error:
                 logger.warning(f"Falha ao enviar notificação WebSocket: {notif_error}")
+            
+            # Enviar email de alerta (em thread separada para não bloquear)
+            try:
+                from services.email_service import email_service
+                from models.user import User
+                
+                # Buscar email do usuário logado que iniciou o monitoramento
+                recipient_emails = []
+                
+                # Prioridade 1: Email do usuário logado que iniciou o monitoramento
+                logged_user_email = self.camera_user_emails.get(camera_id)
+                if logged_user_email:
+                    recipient_emails.append(logged_user_email)
+                    logger.info(f"Enviando email para usuário logado: {logged_user_email}")
+                else:
+                    # Fallback: Verificar modo de destinatários configurado
+                    alert_mode = getattr(settings, 'alert_recipient_mode', 'admins_only')
+                    alert_emails_config = getattr(settings, 'alert_emails', None)
+                    
+                    if alert_mode == 'all_users':
+                        # Enviar para todos os usuários ativos
+                        users_to_notify = db.query(User).filter(
+                            User.is_active == True
+                        ).all()
+                        recipient_emails = [user.email for user in users_to_notify]
+                    elif alert_mode == 'admins_only':
+                        # Enviar apenas para administradores ativos
+                        users_to_notify = db.query(User).filter(
+                            User.is_active == True,
+                            User.role == 'admin'
+                        ).all()
+                        recipient_emails = [user.email for user in users_to_notify]
+                    elif alert_mode == 'custom':
+                        # Usar apenas emails configurados manualmente
+                        recipient_emails = []
+                    
+                    # Adicionar emails customizados (se configurados)
+                    if alert_emails_config:
+                        custom_emails = [email.strip() for email in alert_emails_config.split(',') if email.strip()]
+                        recipient_emails.extend(custom_emails)
+                    
+                    # Remover duplicatas
+                    recipient_emails = list(set(recipient_emails))
+                
+                if recipient_emails and email_service.is_configured():
+                    # Verificar cooldown de email (evitar spam)
+                    last_email = self.last_email_time.get(camera_id, 0)
+                    time_since_last_email = timestamp - last_email
+                    
+                    if time_since_last_email < self.email_cooldown:
+                        remaining = self.email_cooldown - time_since_last_email
+                        logger.debug(f"Email em cooldown para câmera {camera_id} ({remaining:.1f}s restantes)")
+                    else:
+                        # Atualizar timestamp do último email
+                        self.last_email_time[camera_id] = timestamp
+                        
+                        # Enviar email em thread separada para não bloquear
+                        import threading
+                        def send_email_async():
+                            timestamp_str = datetime.fromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M:%S')
+                            logger.info(f"📧 Enviando email de alerta para {len(recipient_emails)} destinatário(s) - Câmera: {camera_name}")
+                            
+                            # Usar o caminho absoluto do arquivo para garantir que a imagem seja encontrada
+                            # Normalizar o caminho para evitar problemas com barras/contrabarras
+                            image_path_for_email = None
+                            if filepath:
+                                # Converter para caminho absoluto normalizado
+                                abs_path = os.path.abspath(filepath)
+                                if os.path.exists(abs_path):
+                                    image_path_for_email = abs_path
+                                    logger.info(f"📷 Imagem da intrusão será anexada: {os.path.basename(image_path_for_email)}")
+                                else:
+                                    logger.warning(f"⚠️ Imagem não encontrada no caminho: {abs_path}")
+                            
+                            email_service.send_intrusion_alert(
+                                to_emails=recipient_emails,
+                                camera_name=camera_name,
+                                event_description=description,
+                                timestamp=timestamp_str,
+                                confidence=event.confidence,
+                                image_path=image_path_for_email
+                            )
+                            # Marcar evento como notificado
+                            try:
+                                event.is_notified = True
+                                db.commit()
+                            except Exception as e:
+                                logger.warning(f"Erro ao marcar evento como notificado: {e}")
+                        
+                        email_thread = threading.Thread(target=send_email_async, daemon=True)
+                        email_thread.start()
+                        logger.info(f"✅ Thread de email iniciada para {len(recipient_emails)} destinatário(s)")
+                else:
+                    if not email_service.is_configured():
+                        logger.debug("Serviço de email não configurado, pulando envio")
+                    else:
+                        logger.debug("Nenhum usuário para notificar por email")
+            except Exception as email_error:
+                logger.warning(f"Erro ao enviar email de alerta: {email_error}")
             
         except Exception as e:
             logger.error(f"Erro ao processar intrusão (câmera {camera_id}): {e}", exc_info=True)

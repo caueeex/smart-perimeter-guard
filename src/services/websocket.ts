@@ -200,8 +200,22 @@ class WebSocketService {
       }
     });
 
-    // Reproduzir som de alerta (opcional)
-    this.playAlertSound();
+    // Reproduzir som de alerta (opcional) - verificar configurações
+    const settings = localStorage.getItem('settings_notifications');
+    if (settings) {
+      try {
+        const notificationSettings = JSON.parse(settings);
+        if (notificationSettings.sound && notificationSettings.intrusion) {
+          this.playAlertSound();
+        }
+      } catch (e) {
+        // Se não conseguir parsear, toca o som por padrão
+        this.playAlertSound();
+      }
+    } else {
+      // Se não houver configurações, toca o som por padrão
+      this.playAlertSound();
+    }
 
     // Chamar callback se definido
     if (this.callbacks.onIntrusionAlert) {
